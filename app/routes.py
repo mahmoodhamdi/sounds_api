@@ -9,19 +9,14 @@ from app import db, bcrypt
 from app.models import User, Level, Video, UserLevel, UserVideoProgress, ExamResult, WelcomeVideo
 from app.auth import admin_required, client_required, authenticate_user, create_user_token
 
-
 bp = Blueprint('main', __name__)
 
 # Serve uploaded files
-
-
 @bp.route('/Uploads/levels/<filename>')
 def serve_uploaded_file(filename):
     return send_from_directory(current_app.config['UPLOAD_FOLDER'], filename)
 
 # Custom decorator to allow both admin and client roles
-
-
 def admin_or_client_required(f):
     @jwt_required()
     def wrapper(*args, **kwargs):
@@ -34,8 +29,6 @@ def admin_or_client_required(f):
     return wrapper
 
 # Welcome Video Management Routes
-
-
 @bp.route('/welcome_video', methods=['POST'])
 @admin_required
 def set_welcome_video():
@@ -55,7 +48,6 @@ def set_welcome_video():
         'video_url': video_url
     }), 200
 
-
 @bp.route('/welcome_video', methods=['GET'])
 def get_welcome_video():
     welcome_video = WelcomeVideo.query.first()
@@ -68,8 +60,6 @@ def get_welcome_video():
     }), 200
 
 # Authentication Routes
-
-
 @bp.route('/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -102,7 +92,6 @@ def register():
         'token': token
     }), 201
 
-
 @bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -123,8 +112,6 @@ def login():
     }), 200
 
 # User Management Routes
-
-
 @bp.route('/users/<int:user_id>', methods=['GET'])
 @client_required
 def get_user(user_id):
@@ -143,7 +130,6 @@ def get_user(user_id):
         'role': target_user.role,
         'picture': target_user.picture
     }), 200
-
 
 @bp.route('/users/<int:user_id>', methods=['PUT'])
 @client_required
@@ -173,7 +159,6 @@ def update_user(user_id):
         'picture': target_user.picture
     }), 200
 
-
 @bp.route('/admin/users', methods=['GET'])
 @admin_required
 def get_all_users():
@@ -188,7 +173,6 @@ def get_all_users():
     } for user in users]
     return jsonify(result), 200
 
-
 @bp.route('/admin/users/<int:user_id>', methods=['DELETE'])
 @admin_required
 def delete_user(user_id):
@@ -201,7 +185,6 @@ def delete_user(user_id):
     db.session.commit()
 
     return jsonify({'message': 'User deleted successfully'}), 200
-
 
 @bp.route('/admin/users/<int:user_id>/reset_password', methods=['POST'])
 @admin_required
@@ -217,7 +200,6 @@ def reset_user_password(user_id):
     db.session.commit()
 
     return jsonify({'message': 'Password reset successfully'}), 200
-
 
 @bp.route('/admin/users/<int:user_id>/assign_level/<int:level_id>', methods=['POST'])
 @admin_required
@@ -257,8 +239,6 @@ def assign_level_to_user(user_id, level_id):
     return jsonify({'message': 'Level assigned successfully'}), 201
 
 # Level Management Routes
-
-
 @bp.route('/levels', methods=['POST'])
 @admin_required
 def create_level():
@@ -311,7 +291,6 @@ def create_level():
         'videos': []
     }), 201
 
-
 @bp.route('/levels/<int:level_id>', methods=['PUT'])
 @admin_required
 def update_level(level_id):
@@ -355,7 +334,6 @@ def update_level(level_id):
         'videos': [{'id': v.id, 'youtube_link': v.youtube_link, 'questions': json.loads(v.questions) if v.questions else []} for v in level.videos]
     }), 200
 
-
 @bp.route('/levels/<int:level_id>', methods=['DELETE'])
 @admin_required
 def delete_level(level_id):
@@ -372,12 +350,11 @@ def delete_level(level_id):
 
     return jsonify({'message': 'Level deleted successfully'}), 200
 
-
 @bp.route('/levels', methods=['GET'])
 @admin_or_client_required
 def get_levels():
     current_user_id = int(get_jwt_identity())
-    user = -User.query.get(current_user_id)
+    user = User.query.get(current_user_id)  # Fixed: Removed unary minus
 
     min_price = request.args.get('min_price', type=float)
     max_price = request.args.get('max_price', type=float)
@@ -435,8 +412,7 @@ def get_levels():
                 }
                 level_data['videos'].append(video_data)
         else:
-            level_data['videos'] = [{'id': v.id, 'youtube_link': '', 'questions': [
-            ], 'is_opened': False} for v in level.videos]
+            level_data['videos'] = [{'id': v.id, 'youtube_link': '', 'questions': []} for v in level.videos]
 
         if user.role == 'admin':
             level_data['user_count'] = len(level.user_levels)
@@ -444,7 +420,6 @@ def get_levels():
         result.append(level_data)
 
     return jsonify(result), 200
-
 
 @bp.route('/admin/levels', methods=['GET'])
 @admin_required
@@ -485,7 +460,6 @@ def admin_get_all_levels():
         'user_count': len(level.user_levels)
     } for level in levels]
     return jsonify(result), 200
-
 
 @bp.route('/levels/<int:level_id>', methods=['GET'])
 @client_required
@@ -529,14 +503,11 @@ def get_level(level_id):
             }
             level_data['videos'].append(video_data)
     else:
-        level_data['videos'] = [{'id': v.id, 'youtube_link': '', 'questions': [
-        ], 'is_opened': False} for v in level.videos]
+        level_data['videos'] = [{'id': v.id, 'youtube_link': '', 'questions': []} for v in level.videos]
 
     return jsonify(level_data), 200
 
 # Video Management Routes
-
-
 @bp.route('/levels/<int:level_id>/videos', methods=['POST'])
 @admin_required
 def add_video_to_level(level_id):
@@ -559,7 +530,6 @@ def add_video_to_level(level_id):
         'is_opened': False
     }), 201
 
-
 @bp.route('/videos/<int:video_id>', methods=['PUT'])
 @admin_required
 def update_video(video_id):
@@ -578,7 +548,6 @@ def update_video(video_id):
         'questions': json.loads(video.questions) if video.questions else []
     }), 200
 
-
 @bp.route('/videos/<int:video_id>', methods=['DELETE'])
 @admin_required
 def delete_video(video_id):
@@ -594,7 +563,6 @@ def delete_video(video_id):
 
     return jsonify({'message': 'Video deleted successfully'}), 200
 
-
 @bp.route('/admin/videos', methods=['GET'])
 @admin_required
 def get_all_videos():
@@ -608,7 +576,6 @@ def get_all_videos():
         'user_progress_count': UserVideoProgress.query.filter_by(video_id=video.id).count()
     } for video in videos]
     return jsonify(result), 200
-
 
 @bp.route('/users/<int:user_id>/levels/<int:level_id>/videos/<int:video_id>/complete', methods=['PATCH'])
 @client_required
@@ -669,8 +636,6 @@ def complete_video(user_id, level_id, video_id):
     return jsonify({'message': 'Video completed successfully'}), 200
 
 # Exam Routes
-
-
 @bp.route('/exams/<int:level_id>/initial', methods=['POST'])
 @client_required
 def submit_initial_exam(level_id):
@@ -710,7 +675,6 @@ def submit_initial_exam(level_id):
         'percentage': percentage,
         'type': 'initial'
     }), 201
-
 
 @bp.route('/exams/<int:level_id>/final', methods=['POST'])
 @client_required
@@ -759,7 +723,6 @@ def submit_final_exam(level_id):
         'type': 'final'
     }), 201
 
-
 @bp.route('/exams/<int:level_id>/user/<int:user_id>', methods=['GET'])
 @client_required
 def get_user_exam_results(level_id, user_id):
@@ -784,7 +747,6 @@ def get_user_exam_results(level_id, user_id):
 
     return jsonify(results), 200
 
-
 @bp.route('/admin/exams', methods=['GET'])
 @admin_required
 def get_all_exam_results():
@@ -804,8 +766,6 @@ def get_all_exam_results():
     return jsonify(result), 200
 
 # Video Questions Submission Route
-
-
 @bp.route('/users/<int:user_id>/levels/<int:level_id>/videos/<int:video_id>/submit_questions', methods=['POST'])
 @client_required
 def submit_video_questions(user_id, level_id, video_id):
@@ -848,8 +808,6 @@ def submit_video_questions(user_id, level_id, video_id):
     }), 200
 
 # Report Route
-
-
 @bp.route('/report', methods=['GET'])
 @client_required
 def get_user_report():
@@ -987,7 +945,6 @@ Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
         response.headers['Content-Disposition'] = f'inline; filename=user_report_{user.id}.md'
         return response  # User Progress Routes
 
-
 @bp.route('/users/<int:user_id>/levels', methods=['GET'])
 @client_required
 def get_user_levels(user_id):
@@ -1046,7 +1003,6 @@ def get_user_levels(user_id):
 
     return jsonify(result), 200
 
-
 @bp.route('/users/<int:user_id>/levels/<int:level_id>/purchase', methods=['POST'])
 @client_required
 def purchase_level(user_id, level_id):
@@ -1089,7 +1045,6 @@ def purchase_level(user_id, level_id):
 
     return jsonify({'message': 'Level purchased successfully'}), 201
 
-
 @bp.route('/users/<int:user_id>/levels/<int:level_id>/update_progress', methods=['PATCH'])
 @client_required
 def update_level_progress(user_id, level_id):
@@ -1123,8 +1078,6 @@ def update_level_progress(user_id, level_id):
     }), 200
 
 # Statistics Routes (Admin only)
-
-
 @bp.route('/admin/statistics', methods=['GET'])
 @admin_required
 def get_admin_statistics():
@@ -1149,7 +1102,6 @@ def get_admin_statistics():
         'completion_rate': round(completion_rate, 2),
         'popular_levels': [{'name': level, 'purchases': purchases} for level, purchases in popular_levels]
     }), 200
-
 
 @bp.route('/admin/users/<int:user_id>/statistics', methods=['GET'])
 @admin_required
