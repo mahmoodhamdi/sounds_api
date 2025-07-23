@@ -95,11 +95,19 @@ def register():
 @bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
+    is_google_login = data.get('google', False)
 
-    user = authenticate_user(data['email'], data['password'])
+    user = User.query.filter_by(email=data['email']).first()
     if not user:
-        return jsonify({'message': 'Invalid credentials'}), 401
+        return jsonify({'message': 'User not found'}), 404
 
+    if not is_google_login:
+        # في تسجيل دخول عادي، نتحقق من الباسورد
+        if not bcrypt.check_password_hash(user.password, data['password']):
+            return jsonify({'message': 'Invalid credentials'}), 401
+    else:
+        # لو تسجيل دخول من Google وتأكدنا من الإيميل فقط
+        print("Google login: skipping password check")
     token = create_user_token(user)
 
     return jsonify({

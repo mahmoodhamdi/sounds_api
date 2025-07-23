@@ -4,4 +4,4 @@ Flask-Bcrypt
 Flask-JWT-Extended
 Flask-CORS
 Werkzeug
-flask-migrate
+Flask-Migrate
