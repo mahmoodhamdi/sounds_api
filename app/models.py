@@ -71,6 +71,11 @@ class UserVideoProgress(db.Model):
     correct_words_list = db.Column(db.Text, nullable=True)
     wrong_words_list = db.Column(db.Text, nullable=True)
 
+    # Add unique constraint on user_level_id and video_id
+    __table_args__ = (
+        db.UniqueConstraint('user_level_id', 'video_id', name='uq_user_level_video'),
+    )
+
     def __repr__(self):
         return f'UserVideoProgress(UserLevel: {self.user_level_id}, Video: {self.video_id}, Opened: {self.is_opened}, Completed: {self.is_completed})'
 

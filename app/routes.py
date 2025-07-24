@@ -8,6 +8,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from app import db, bcrypt
 from app.models import User, Level, Video, UserLevel, UserVideoProgress, ExamResult, WelcomeVideo
 from app.auth import admin_required, client_required, authenticate_user, create_user_token
+from sqlalchemy.exc import IntegrityError
 
 bp = Blueprint('main', __name__)
 
@@ -215,8 +216,7 @@ def assign_level_to_user(user_id, level_id):
     user = User.query.get_or_404(user_id)
     level = Level.query.get_or_404(level_id)
 
-    existing_user_level = UserLevel.query.filter_by(
-        user_id=user_id, level_id=level_id).first()
+    existing_user_level = UserLevel.query.filter_by(user_id=user_id, level_id=level_id).first()
     if existing_user_level:
         return jsonify({'message': 'Level already assigned'}), 400
 
@@ -230,17 +230,21 @@ def assign_level_to_user(user_id, level_id):
     db.session.add(user_level)
     db.session.flush()
 
-    level_videos = Video.query.filter_by(
-        level_id=level_id).order_by(Video.id).all()
+    level_videos = Video.query.filter_by(level_id=level_id).order_by(Video.id).all()
 
     for i, video in enumerate(level_videos):
-        video_progress = UserVideoProgress(
-            user_level_id=user_level.id,
-            video_id=video.id,
-            is_opened=(i == 0),
-            is_completed=False
-        )
-        db.session.add(video_progress)
+        # Check if progress already exists
+        existing_progress = UserVideoProgress.query.filter_by(
+            user_level_id=user_level.id, video_id=video.id
+        ).first()
+        if not existing_progress:
+            video_progress = UserVideoProgress(
+                user_level_id=user_level.id,
+                video_id=video.id,
+                is_opened=(i == 0),
+                is_completed=False
+            )
+            db.session.add(video_progress)
 
     db.session.commit()
 
@@ -1040,18 +1044,27 @@ def purchase_level(user_id, level_id):
     level_videos = Video.query.filter_by(
         level_id=level_id).order_by(Video.id).all()
 
-    for i, video in enumerate(level_videos):
-        video_progress = UserVideoProgress(
-            user_level_id=user_level.id,
-            video_id=video.id,
-            is_opened=(i == 0),
-            is_completed=False
-        )
-        db.session.add(video_progress)
+    try:
+        for i, video in enumerate(level_videos):
+            # Check if progress already exists
+            existing_progress = UserVideoProgress.query.filter_by(
+                user_level_id=user_level.id, video_id=video.id
+            ).first()
+            if not existing_progress:
+                video_progress = UserVideoProgress(
+                    user_level_id=user_level.id,
+                    video_id=video.id,
+                    is_opened=(i == 0),
+                    is_completed=False
+                )
+                db.session.add(video_progress)
 
-    db.session.commit()
+        db.session.commit()
+        return jsonify({'message': 'Level purchased successfully'}), 201
 
-    return jsonify({'message': 'Level purchased successfully'}), 201
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({'message': 'Failed to purchase level due to existing video progress'}), 400
 
 @bp.route('/users/<int:user_id>/levels/<int:level_id>/update_progress', methods=['PATCH'])
 @client_required
