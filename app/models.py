@@ -5,7 +5,7 @@ class WelcomeVideo(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     video_url = db.Column(db.String(200), nullable=False)
 
-    def __repr__(self):
+    def _repr_(self):
         return f'WelcomeVideo(\'{self.video_url}\')'
 
 class User(db.Model):
@@ -17,7 +17,7 @@ class User(db.Model):
     picture = db.Column(db.String(200), nullable=True)
     levels = db.relationship('UserLevel', backref='user', lazy=True)
 
-    def __repr__(self):
+    def _repr_(self):
         return f'User(\'{self.name}\', \'{self.email}\', \'{self.role}\')'
 
 class Level(db.Model):
@@ -33,17 +33,30 @@ class Level(db.Model):
     videos = db.relationship('Video', backref='level', lazy=True)
     user_levels = db.relationship('UserLevel', backref='level', lazy=True)
 
-    def __repr__(self):
+    def _repr_(self):
         return f'Level(\'{self.name}\', {self.price})'
 
 class Video(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     level_id = db.Column(db.Integer, db.ForeignKey('level.id'), nullable=False)
     youtube_link = db.Column(db.String(200), nullable=False)
-    questions = db.Column(db.Text, nullable=True)  # JSON with question_id for each question
+    questions = db.relationship('Question', backref='video', lazy=True, cascade='all, delete-orphan')
 
-    def __repr__(self):
+    def _repr_(self):
         return f'Video(\'{self.youtube_link}\')'
+
+class Question(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    video_id = db.Column(db.Integer, db.ForeignKey('video.id'), nullable=False)
+    text = db.Column(db.Text, nullable=False)
+    order = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationship with user answers
+    user_answers = db.relationship('UserQuestionAnswer', backref='question', lazy=True, cascade='all, delete-orphan')
+
+    def _repr_(self):
+        return f'Question(Video: {self.video_id}, Order: {self.order})'
 
 class UserLevel(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -56,7 +69,7 @@ class UserLevel(db.Model):
     score_difference = db.Column(db.Float, nullable=True)
     videos_progress = db.relationship('UserVideoProgress', backref='user_level', lazy=True)
 
-    def __repr__(self):
+    def _repr_(self):
         return f'UserLevel(User: {self.user_id}, Level: {self.level_id})'
 
 class UserVideoProgress(db.Model):
@@ -65,43 +78,36 @@ class UserVideoProgress(db.Model):
     video_id = db.Column(db.Integer, db.ForeignKey('video.id'), nullable=False)
     is_opened = db.Column(db.Boolean, default=False)
     is_completed = db.Column(db.Boolean, default=False)
-    # Remove these fields as they'll be tracked in VideoQuestionSubmission
-    # correct_words = db.Column(db.Integer, nullable=True)
-    # wrong_words = db.Column(db.Integer, nullable=True)
-    # percentage = db.Column(db.Float, nullable=True)
-    # correct_words_list = db.Column(db.Text, nullable=True)
-    # wrong_words_list = db.Column(db.Text, nullable=True)
 
     # Add unique constraint on user_level_id and video_id
-    __table_args__ = (
+    _table_args_ = (
         db.UniqueConstraint('user_level_id', 'video_id', name='uq_user_level_video'),
     )
 
-    def __repr__(self):
+    def _repr_(self):
         return f'UserVideoProgress(UserLevel: {self.user_level_id}, Video: {self.video_id}, Opened: {self.is_opened}, Completed: {self.is_completed})'
 
-class VideoQuestionSubmission(db.Model):
-    """New model to track multiple question submissions for each video"""
+class UserQuestionAnswer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    level_id = db.Column(db.Integer, db.ForeignKey('level.id'), nullable=False)
-    video_id = db.Column(db.Integer, db.ForeignKey('video.id'), nullable=False)
-    submission_number = db.Column(db.Integer, nullable=False, default=1)  # Track attempt number
+    question_id = db.Column(db.Integer, db.ForeignKey('question.id'), nullable=False)
     correct_words = db.Column(db.Integer, nullable=False, default=0)
     wrong_words = db.Column(db.Integer, nullable=False, default=0)
     percentage = db.Column(db.Float, nullable=False, default=0.0)
-    correct_words_list = db.Column(db.Text, nullable=True)  # JSON list
-    wrong_words_list = db.Column(db.Text, nullable=True)    # JSON list
-    questions_answers = db.Column(db.Text, nullable=True)   # JSON with question_id and user's answer
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    correct_words_list = db.Column(db.Text, nullable=True)
+    wrong_words_list = db.Column(db.Text, nullable=True)
+    submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
     
-    # Relationships
-    user = db.relationship('User', backref='video_question_submissions')
-    level = db.relationship('Level', backref='video_question_submissions')
-    video = db.relationship('Video', backref='question_submissions')
+    # Add unique constraint on user_id and question_id
+    _table_args_ = (
+        db.UniqueConstraint('user_id', 'question_id', name='uq_user_question'),
+    )
 
-    def __repr__(self):
-        return f'VideoQuestionSubmission(User: {self.user_id}, Video: {self.video_id}, Attempt: {self.submission_number})'
+    # Relationships
+    user = db.relationship('User', backref='question_answers')
+
+    def _repr_(self):
+        return f'UserQuestionAnswer(User: {self.user_id}, Question: {self.question_id}, Percentage: {self.percentage})'
 
 class ExamResult(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -115,5 +121,5 @@ class ExamResult(db.Model):
     correct_words_list = db.Column(db.Text, nullable=True)
     wrong_words_list = db.Column(db.Text, nullable=True)
 
-    def __repr__(self):
+    def _repr_(self):
         return f'ExamResult(User: {self.user_id}, Level: {self.level_id}, Type: {self.type}, Score: {self.percentage})'
