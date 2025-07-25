@@ -40,10 +40,23 @@ class Video(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     level_id = db.Column(db.Integer, db.ForeignKey('level.id'), nullable=False)
     youtube_link = db.Column(db.String(200), nullable=False)
-    questions = db.Column(db.Text, nullable=True)
+    questions = db.relationship('Question', backref='video', lazy=True, cascade='all, delete-orphan')
 
     def __repr__(self):
         return f'Video(\'{self.youtube_link}\')'
+
+class Question(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    video_id = db.Column(db.Integer, db.ForeignKey('video.id'), nullable=False)
+    text = db.Column(db.Text, nullable=False)
+    order = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationship with user answers
+    user_answers = db.relationship('UserQuestionAnswer', backref='question', lazy=True, cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'Question(Video: {self.video_id}, Order: {self.order})'
 
 class UserLevel(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -65,11 +78,6 @@ class UserVideoProgress(db.Model):
     video_id = db.Column(db.Integer, db.ForeignKey('video.id'), nullable=False)
     is_opened = db.Column(db.Boolean, default=False)
     is_completed = db.Column(db.Boolean, default=False)
-    correct_words = db.Column(db.Integer, nullable=True)
-    wrong_words = db.Column(db.Integer, nullable=True)
-    percentage = db.Column(db.Float, nullable=True)
-    correct_words_list = db.Column(db.Text, nullable=True)
-    wrong_words_list = db.Column(db.Text, nullable=True)
 
     # Add unique constraint on user_level_id and video_id
     __table_args__ = (
@@ -78,6 +86,28 @@ class UserVideoProgress(db.Model):
 
     def __repr__(self):
         return f'UserVideoProgress(UserLevel: {self.user_level_id}, Video: {self.video_id}, Opened: {self.is_opened}, Completed: {self.is_completed})'
+
+class UserQuestionAnswer(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    question_id = db.Column(db.Integer, db.ForeignKey('question.id'), nullable=False)
+    correct_words = db.Column(db.Integer, nullable=False, default=0)
+    wrong_words = db.Column(db.Integer, nullable=False, default=0)
+    percentage = db.Column(db.Float, nullable=False, default=0.0)
+    correct_words_list = db.Column(db.Text, nullable=True)
+    wrong_words_list = db.Column(db.Text, nullable=True)
+    submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Add unique constraint on user_id and question_id
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'question_id', name='uq_user_question'),
+    )
+
+    # Relationships
+    user = db.relationship('User', backref='question_answers')
+
+    def __repr__(self):
+        return f'UserQuestionAnswer(User: {self.user_id}, Question: {self.question_id}, Percentage: {self.percentage})'
 
 class ExamResult(db.Model):
     id = db.Column(db.Integer, primary_key=True)

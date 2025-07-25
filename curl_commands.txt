@@ -195,3 +195,230 @@ curl -X GET "{{base}}/admin/statistics" \
 # Get User Statistics (Admin)
 curl -X GET "{{base}}/admin/users/${CLIENT_ID}/statistics" \
      -H "Authorization: Bearer {{ADMIN_TOKEN}}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Question Management CRUD Operations
+
+# 1. Create Question (Admin only)
+curl -X POST "http://localhost:5000/videos/1/questions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -d '{
+    "text": "What is the main topic of this video?",
+    "order": 1
+  }'
+
+# 2. Update Question (Admin only)
+curl -X PUT "http://localhost:5000/questions/1" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -d '{
+    "text": "Updated question text",
+    "order": 2
+  }'
+
+# 3. Delete Question (Admin only)
+curl -X DELETE "http://localhost:5000/questions/1" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+
+# 4. Get All Questions (Admin only)
+curl -X GET "http://localhost:5000/admin/questions" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+
+# 5. Get Questions for a Video (Admin or Client)
+curl -X GET "http://localhost:5000/videos/1/questions" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# 6. Get All Answers for a Question (Admin only)
+curl -X GET "http://localhost:5000/admin/questions/1/answers" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+
+# Question Answer Submission
+
+# 7. Submit Answer to Question (Client)
+curl -X POST "http://localhost:5000/questions/1/submit" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_CLIENT_TOKEN" \
+  -d '{
+    "correct_words": 10,
+    "wrong_words": 2,
+    "correct_words_list": ["word1", "word2", "word3"],
+    "wrong_words_list": ["wrong1", "wrong2"]
+  }'
+
+# 8. Get User Answer for a Question
+curl -X GET "http://localhost:5000/users/1/questions/1/answer" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Updated Video Management (Questions removed from video creation)
+
+# 9. Create Video (Admin only) - No questions field
+curl -X POST "http://localhost:5000/levels/1/videos" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -d '{
+    "youtube_link": "https://youtube.com/watch?v=example"
+  }'
+
+# 10. Update Video (Admin only) - No questions field
+curl -X PUT "http://localhost:5000/videos/1" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -d '{
+    "youtube_link": "https://youtube.com/watch?v=updated"
+  }'
+
+# Updated Routes - Get Levels (includes question data and user answers)
+
+# 11. Get All Levels (Client/Admin) - Now includes questions and user answers
+curl -X GET "http://localhost:5000/levels" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Response format example:
+# {
+#   "id": 1,
+#   "videos": [
+#     {
+#       "id": 1,
+#       "youtube_link": "...",
+#       "questions": [
+#         {
+#           "id": 1,
+#           "text": "Question text",
+#           "order": 1,
+#           "user_answer": {  // Only for clients who answered
+#             "correct_words": 10,
+#             "wrong_words": 2,
+#             "percentage": 83.33,
+#             "submitted_at": "2024-01-01T12:00:00"
+#           }
+#         }
+#       ]
+#     }
+#   ]
+# }
+
+# 12. Get Level Details (Client) - Now includes questions and user answers
+curl -X GET "http://localhost:5000/levels/1" \
+  -H "Authorization: Bearer YOUR_CLIENT_TOKEN"
+
+# 13. Admin Get All Levels - Now includes questions
+curl -X GET "http://localhost:5000/admin/levels" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+
+# 14. Get All Videos (Admin) - Now includes questions
+curl -X GET "http://localhost:5000/admin/videos" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+
+# Updated User Report - Now includes question data
+
+# 15. Get User Report (JSON format) - Now includes questions and answers
+curl -X GET "http://localhost:5000/report?format=json" \
+  -H "Authorization: Bearer YOUR_CLIENT_TOKEN"
+
+# 16. Get User Report (Markdown format) - Now includes questions and answers
+curl -X GET "http://localhost:5000/report?format=markdown" \
+  -H "Authorization: Bearer YOUR_CLIENT_TOKEN"
+
+# Updated Statistics - Now includes question statistics
+
+# 17. Get User Statistics (Admin) - Now includes question stats
+curl -X GET "http://localhost:5000/admin/users/1/statistics" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+
+# Response example:
+# {
+#   "user_id": 1,
+#   "user_name": "John Doe",
+#   "purchased_levels": 2,
+#   "completed_levels": 1,
+#   "completion_rate": 50.0,
+#   "average_initial_score": 75.5,
+#   "average_final_score": 85.2,
+#   "average_improvement": 9.7,
+#   "total_exams_taken": 4,
+#   "total_questions_answered": 12,
+#   "average_question_score": 78.3
+# }
+
+# Complete Video (Still works the same)
+curl -X PATCH "http://localhost:5000/users/1/levels/1/videos/1/complete" \
+  -H "Authorization: Bearer YOUR_CLIENT_TOKEN"
+
+# Authentication and User Management (No changes)
+curl -X POST "http://localhost:5000/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "John Doe",
+    "email": "john@example.com",
+    "password": "password123",
+    "role": "client"
+  }'
+
+curl -X POST "http://localhost:5000/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "john@example.com",
+    "password": "password123"
+  }'
+
+# Level Management (No changes in basic CRUD)
+curl -X POST "http://localhost:5000/levels" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -F "name=Level 1" \
+  -F "description=Description here" \
+  -F "level_number=1" \
+  -F "price=29.99" \
+  -F "file=@image.jpg"
+
+# Exam Routes (No changes)
+curl -X POST "http://localhost:5000/exams/1/initial" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_CLIENT_TOKEN" \
+  -d '{
+    "correct_words": 15,
+    "wrong_words": 5,
+    "correct_words_list": ["word1", "word2"],
+    "wrong_words_list": ["wrong1"]
+  }'
+
+curl -X POST "http://localhost:5000/exams/1/final" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_CLIENT_TOKEN" \
+  -d '{
+    "correct_words": 18,
+    "wrong_words": 2,
+    "correct_words_list": ["word1", "word2"],
+    "wrong_words_list": ["wrong1"]
+  }'

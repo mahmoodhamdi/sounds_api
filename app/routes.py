@@ -6,7 +6,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, send_from_directory, current_app, make_response
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app import db, bcrypt
-from app.models import User, Level, Video, UserLevel, UserVideoProgress, ExamResult, WelcomeVideo
+from app.models import User, Level, Video, UserLevel, UserVideoProgress, ExamResult, WelcomeVideo, Question, UserQuestionAnswer
 from app.auth import admin_required, client_required, authenticate_user, create_user_token
 from sqlalchemy.exc import IntegrityError
 
@@ -189,6 +189,7 @@ def delete_user(user_id):
 
     UserLevel.query.filter_by(user_id=user_id).delete()
     ExamResult.query.filter_by(user_id=user_id).delete()
+    UserQuestionAnswer.query.filter_by(user_id=user_id).delete()
 
     db.session.delete(user)
     db.session.commit()
@@ -343,8 +344,21 @@ def update_level(level_id):
         'initial_exam_question': level.initial_exam_question,
         'final_exam_question': level.final_exam_question,
         'videos_count': len(level.videos),
-        'videos': [{'id': v.id, 'youtube_link': v.youtube_link, 'questions': json.loads(v.questions) if v.questions else []} for v in level.videos]
+        'videos': [self._format_video_data(v) for v in level.videos]
     }), 200
+
+def _format_video_data(video):
+    """Helper function to format video data with questions"""
+    questions = Question.query.filter_by(video_id=video.id).order_by(Question.order).all()
+    return {
+        'id': video.id,
+        'youtube_link': video.youtube_link,
+        'questions': [{
+            'id': q.id,
+            'text': q.text,
+            'order': q.order
+        } for q in questions]
+    }
 
 @bp.route('/levels/<int:level_id>', methods=['DELETE'])
 @admin_required
@@ -366,7 +380,7 @@ def delete_level(level_id):
 @admin_or_client_required
 def get_levels():
     current_user_id = int(get_jwt_identity())
-    user = User.query.get(current_user_id)  # Fixed: Removed unary minus
+    user = User.query.get(current_user_id)
 
     min_price = request.args.get('min_price', type=float)
     max_price = request.args.get('max_price', type=float)
@@ -416,10 +430,37 @@ def get_levels():
                     video_id=video.id
                 ).first()
 
+                # Get questions for this video
+                questions = Question.query.filter_by(video_id=video.id).order_by(Question.order).all()
+                questions_data = []
+                
+                if user.role == 'admin' or (video_progress and video_progress.is_opened):
+                    for question in questions:
+                        question_data = {
+                            'id': question.id,
+                            'text': question.text,
+                            'order': question.order
+                        }
+                        
+                        # Add user's answer if exists
+                        if user.role == 'client':
+                            user_answer = UserQuestionAnswer.query.filter_by(
+                                user_id=current_user_id, question_id=question.id
+                            ).first()
+                            if user_answer:
+                                question_data['user_answer'] = {
+                                    'correct_words': user_answer.correct_words,
+                                    'wrong_words': user_answer.wrong_words,
+                                    'percentage': user_answer.percentage,
+                                    'submitted_at': user_answer.submitted_at.isoformat()
+                                }
+                        
+                        questions_data.append(question_data)
+
                 video_data = {
                     'id': video.id,
                     'youtube_link': video.youtube_link if user.role == 'admin' else (video.youtube_link if video_progress and video_progress.is_opened else ''),
-                    'questions': json.loads(video.questions) if video.questions and (user.role == 'admin' or (video_progress and video_progress.is_opened)) else [],
+                    'questions': questions_data,
                     'is_opened': video_progress.is_opened if video_progress else False
                 }
                 level_data['videos'].append(video_data)
@@ -464,11 +505,7 @@ def admin_get_all_levels():
         'initial_exam_question': level.initial_exam_question,
         'final_exam_question': level.final_exam_question,
         'videos_count': len(level.videos),
-        'videos': [{
-            'id': v.id,
-            'youtube_link': v.youtube_link,
-            'questions': json.loads(v.questions) if v.questions else []
-        } for v in level.videos],
+        'videos': [_format_video_data(v) for v in level.videos],
         'user_count': len(level.user_levels)
     } for level in levels]
     return jsonify(result), 200
@@ -507,10 +544,35 @@ def get_level(level_id):
                 video_id=video.id
             ).first()
 
+            # Get questions for this video
+            questions = Question.query.filter_by(video_id=video.id).order_by(Question.order).all()
+            questions_data = []
+            
+            for question in questions:
+                question_data = {
+                    'id': question.id,
+                    'text': question.text,
+                    'order': question.order
+                }
+                
+                # Add user's answer if exists
+                user_answer = UserQuestionAnswer.query.filter_by(
+                    user_id=current_user_id, question_id=question.id
+                ).first()
+                if user_answer:
+                    question_data['user_answer'] = {
+                        'correct_words': user_answer.correct_words,
+                        'wrong_words': user_answer.wrong_words,
+                        'percentage': user_answer.percentage,
+                        'submitted_at': user_answer.submitted_at.isoformat()
+                    }
+                
+                questions_data.append(question_data)
+
             video_data = {
                 'id': video.id,
                 'youtube_link': video.youtube_link,
-                'questions': json.loads(video.questions) if video.questions else [],
+                'questions': questions_data,
                 'is_opened': video_progress.is_opened if video_progress else False
             }
             level_data['videos'].append(video_data)
@@ -528,8 +590,7 @@ def add_video_to_level(level_id):
 
     video = Video(
         level_id=level_id,
-        youtube_link=data['youtube_link'],
-        questions=json.dumps(data.get('questions', []))
+        youtube_link=data['youtube_link']
     )
 
     db.session.add(video)
@@ -538,8 +599,7 @@ def add_video_to_level(level_id):
     return jsonify({
         'id': video.id,
         'youtube_link': video.youtube_link,
-        'questions': json.loads(video.questions) if video.questions else [],
-        'is_opened': False
+        'questions': []
     }), 201
 
 @bp.route('/videos/<int:video_id>', methods=['PUT'])
@@ -549,15 +609,12 @@ def update_video(video_id):
     data = request.get_json()
 
     video.youtube_link = data.get('youtube_link', video.youtube_link)
-    video.questions = json.dumps(
-        data.get('questions', json.loads(video.questions) if video.questions else []))
-
     db.session.commit()
 
     return jsonify({
         'id': video.id,
         'youtube_link': video.youtube_link,
-        'questions': json.loads(video.questions) if video.questions else []
+        'questions': [{'id': q.id, 'text': q.text, 'order': q.order} for q in video.questions]
     }), 200
 
 @bp.route('/videos/<int:video_id>', methods=['DELETE'])
@@ -565,8 +622,7 @@ def update_video(video_id):
 def delete_video(video_id):
     video = Video.query.get_or_404(video_id)
 
-    user_progresses = UserVideoProgress.query.filter_by(
-        video_id=video_id).all()
+    user_progresses = UserVideoProgress.query.filter_by(video_id=video_id).all()
     for progress in user_progresses:
         db.session.delete(progress)
 
@@ -584,10 +640,251 @@ def get_all_videos():
         'level_id': video.level_id,
         'level_name': video.level.name if video.level else '',
         'youtube_link': video.youtube_link,
-        'questions': json.loads(video.questions) if video.questions else [],
+        'questions': [{'id': q.id, 'text': q.text, 'order': q.order} for q in video.questions],
         'user_progress_count': UserVideoProgress.query.filter_by(video_id=video.id).count()
     } for video in videos]
     return jsonify(result), 200
+
+# Question Management Routes (CRUD)
+@bp.route('/videos/<int:video_id>/questions', methods=['POST'])
+@admin_required
+def create_question(video_id):
+    video = Video.query.get_or_404(video_id)
+    data = request.get_json()
+
+    # Get the next order number
+    max_order = db.session.query(db.func.max(Question.order)).filter_by(video_id=video_id).scalar() or 0
+    
+    question = Question(
+        video_id=video_id,
+        text=data['text'],
+        order=data.get('order', max_order + 1)
+    )
+
+    db.session.add(question)
+    db.session.commit()
+
+    return jsonify({
+        'id': question.id,
+        'video_id': question.video_id,
+        'text': question.text,
+        'order': question.order,
+        'created_at': question.created_at.isoformat()
+    }), 201
+
+@bp.route('/questions/<int:question_id>', methods=['PUT'])
+@admin_required
+def update_question(question_id):
+    question = Question.query.get_or_404(question_id)
+    data = request.get_json()
+
+    question.text = data.get('text', question.text)
+    question.order = data.get('order', question.order)
+    db.session.commit()
+
+    return jsonify({
+        'id': question.id,
+        'video_id': question.video_id,
+        'text': question.text,
+        'order': question.order,
+        'created_at': question.created_at.isoformat()
+    }), 200
+
+@bp.route('/questions/<int:question_id>', methods=['DELETE'])
+@admin_required
+def delete_question(question_id):
+    question = Question.query.get_or_404(question_id)
+    
+    # Delete all user answers for this question
+    UserQuestionAnswer.query.filter_by(question_id=question_id).delete()
+    
+    db.session.delete(question)
+    db.session.commit()
+
+    return jsonify({'message': 'Question deleted successfully'}), 200
+
+@bp.route('/admin/questions', methods=['GET'])
+@admin_required
+def get_all_questions():
+    questions = Question.query.order_by(Question.video_id, Question.order).all()
+    result = [{
+        'id': question.id,
+        'video_id': question.video_id,
+        'video_link': question.video.youtube_link if question.video else '',
+        'level_name': question.video.level.name if question.video and question.video.level else '',
+        'text': question.text,
+        'order': question.order,
+        'created_at': question.created_at.isoformat(),
+        'answers_count': UserQuestionAnswer.query.filter_by(question_id=question.id).count()
+    } for question in questions]
+    return jsonify(result), 200
+
+@bp.route('/videos/<int:video_id>/questions', methods=['GET'])
+@admin_or_client_required
+def get_video_questions(video_id):
+    video = Video.query.get_or_404(video_id)
+    current_user_id = int(get_jwt_identity())
+    user = User.query.get(current_user_id)
+    
+    questions = Question.query.filter_by(video_id=video_id).order_by(Question.order).all()
+    result = []
+    
+    for question in questions:
+        question_data = {
+            'id': question.id,
+            'video_id': question.video_id,
+            'text': question.text,
+            'order': question.order,
+            'created_at': question.created_at.isoformat()
+        }
+        
+        # Add user's answer if client and answer exists
+        if user.role == 'client':
+            user_answer = UserQuestionAnswer.query.filter_by(
+                user_id=current_user_id, question_id=question.id
+            ).first()
+            if user_answer:
+                question_data['user_answer'] = {
+                    'correct_words': user_answer.correct_words,
+                    'wrong_words': user_answer.wrong_words,
+                    'percentage': user_answer.percentage,
+                    'correct_words_list': json.loads(user_answer.correct_words_list) if user_answer.correct_words_list else [],
+                    'wrong_words_list': json.loads(user_answer.wrong_words_list) if user_answer.wrong_words_list else [],
+                    'submitted_at': user_answer.submitted_at.isoformat()
+                }
+        
+        result.append(question_data)
+    
+    return jsonify(result), 200
+
+# Question Answer Submission Routes
+@bp.route('/questions/<int:question_id>/submit', methods=['POST'])
+@client_required
+def submit_question_answer(question_id):
+    current_user_id = int(get_jwt_identity())
+    question = Question.query.get_or_404(question_id)
+    data = request.get_json()
+
+    # Validate required fields
+    if 'correct_words' not in data or 'wrong_words' not in data:
+        return jsonify({'message': 'correct_words and wrong_words are required'}), 400
+
+    correct_words = data['correct_words']
+    wrong_words = data['wrong_words']
+    total_words = correct_words + wrong_words
+    percentage = (correct_words / total_words * 100) if total_words > 0 else 0
+
+    # Check if user has access to this question (through video access)
+    user_level = UserLevel.query.join(Level).join(Video).filter(
+        UserLevel.user_id == current_user_id,
+        Video.id == question.video_id
+    ).first()
+    
+    if not user_level:
+        return jsonify({'message': 'Access denied. You need to purchase the level first.'}), 403
+
+    # Check if video is opened
+    video_progress = UserVideoProgress.query.filter_by(
+        user_level_id=user_level.id,
+        video_id=question.video_id
+    ).first()
+    
+    if not video_progress or not video_progress.is_opened:
+        return jsonify({'message': 'Video must be opened first'}), 400
+
+    # Check if answer already exists, update if it does
+    existing_answer = UserQuestionAnswer.query.filter_by(
+        user_id=current_user_id, question_id=question_id
+    ).first()
+
+    if existing_answer:
+        existing_answer.correct_words = correct_words
+        existing_answer.wrong_words = wrong_words
+        existing_answer.percentage = percentage
+        existing_answer.correct_words_list = json.dumps(data.get('correct_words_list', []))
+        existing_answer.wrong_words_list = json.dumps(data.get('wrong_words_list', []))
+        existing_answer.submitted_at = datetime.utcnow()
+        answer = existing_answer
+    else:
+        answer = UserQuestionAnswer(
+            user_id=current_user_id,
+            question_id=question_id,
+            correct_words=correct_words,
+            wrong_words=wrong_words,
+            percentage=percentage,
+            correct_words_list=json.dumps(data.get('correct_words_list', [])),
+            wrong_words_list=json.dumps(data.get('wrong_words_list', []))
+        )
+        db.session.add(answer)
+
+    db.session.commit()
+
+    return jsonify({
+        'id': answer.id,
+        'question_id': question_id,
+        'question_text': question.text,
+        'correct_words': answer.correct_words,
+        'wrong_words': answer.wrong_words,
+        'percentage': answer.percentage,
+        'correct_words_list': json.loads(answer.correct_words_list) if answer.correct_words_list else [],
+        'wrong_words_list': json.loads(answer.wrong_words_list) if answer.wrong_words_list else [],
+        'submitted_at': answer.submitted_at.isoformat()
+    }), 200
+
+@bp.route('/users/<int:user_id>/questions/<int:question_id>/answer', methods=['GET'])
+@client_required
+def get_user_question_answer(user_id, question_id):
+    current_user_id = int(get_jwt_identity())
+    user = User.query.get(current_user_id)
+    
+    # Check access permissions
+    if user.role != 'admin' and current_user_id != user_id:
+        return jsonify({'message': 'Access denied'}), 403
+
+    answer = UserQuestionAnswer.query.filter_by(
+        user_id=user_id, question_id=question_id
+    ).first()
+    
+    if not answer:
+        return jsonify({'message': 'Answer not found'}), 404
+
+    question = Question.query.get(question_id)
+    
+    return jsonify({
+        'id': answer.id,
+        'question_id': question_id,
+        'question_text': question.text if question else '',
+        'correct_words': answer.correct_words,
+        'wrong_words': answer.wrong_words,
+        'percentage': answer.percentage,
+        'correct_words_list': json.loads(answer.correct_words_list) if answer.correct_words_list else [],
+        'wrong_words_list': json.loads(answer.wrong_words_list) if answer.wrong_words_list else [],
+        'submitted_at': answer.submitted_at.isoformat()
+    }), 200
+
+@bp.route('/admin/questions/<int:question_id>/answers', methods=['GET'])
+@admin_required
+def get_question_answers(question_id):
+    question = Question.query.get_or_404(question_id)
+    answers = UserQuestionAnswer.query.filter_by(question_id=question_id).all()
+    
+    result = [{
+        'id': answer.id,
+        'user_id': answer.user_id,
+        'user_name': answer.user.name if answer.user else '',
+        'correct_words': answer.correct_words,
+        'wrong_words': answer.wrong_words,
+        'percentage': answer.percentage,
+        'correct_words_list': json.loads(answer.correct_words_list) if answer.correct_words_list else [],
+        'wrong_words_list': json.loads(answer.wrong_words_list) if answer.wrong_words_list else [],
+        'submitted_at': answer.submitted_at.isoformat()
+    } for answer in answers]
+    
+    return jsonify({
+        'question_id': question_id,
+        'question_text': question.text,
+        'answers': result
+    }), 200
 
 @bp.route('/users/<int:user_id>/levels/<int:level_id>/videos/<int:video_id>/complete', methods=['PATCH'])
 @client_required
@@ -777,48 +1074,6 @@ def get_all_exam_results():
     } for exam in exam_results]
     return jsonify(result), 200
 
-# Video Questions Submission Route
-@bp.route('/users/<int:user_id>/levels/<int:level_id>/videos/<int:video_id>/submit_questions', methods=['POST'])
-@client_required
-def submit_video_questions(user_id, level_id, video_id):
-    current_user_id = int(get_jwt_identity())
-    user = User.query.get(current_user_id)
-    if user.role != 'admin' and current_user_id != user_id:
-        return jsonify({'message': 'Access denied'}), 403
-
-    user_level = UserLevel.query.filter_by(
-        user_id=user_id, level_id=level_id).first()
-    if not user_level:
-        return jsonify({'message': 'Level not purchased'}), 400
-
-    video_progress = UserVideoProgress.query.filter_by(
-        user_level_id=user_level.id, video_id=video_id).first()
-    if not video_progress:
-        return jsonify({'message': 'Video not accessible'}), 400
-
-    data = request.get_json()
-    correct_words = data.get('correct_words', 0)
-    wrong_words = data.get('wrong_words', 0)
-    total_words = correct_words + wrong_words
-    percentage = (correct_words / total_words * 100) if total_words > 0 else 0
-
-    video_progress.correct_words = correct_words
-    video_progress.wrong_words = wrong_words
-    video_progress.percentage = percentage
-    video_progress.correct_words_list = json.dumps(
-        data.get('correct_words_list', []))
-    video_progress.wrong_words_list = json.dumps(
-        data.get('wrong_words_list', []))
-
-    db.session.commit()
-
-    return jsonify({
-        'message': 'Video questions submitted successfully',
-        'correct_words': correct_words,
-        'wrong_words': wrong_words,
-        'percentage': percentage
-    }), 200
-
 # Report Route
 @bp.route('/report', methods=['GET'])
 @client_required
@@ -850,16 +1105,49 @@ def get_user_report():
 
         for progress in videos_progress:
             video = Video.query.get(progress.video_id)
+            
+            # Get questions and answers for this video
+            questions = Question.query.filter_by(video_id=video.id).order_by(Question.order).all()
+            questions_data = []
+            
+            for question in questions:
+                user_answer = UserQuestionAnswer.query.filter_by(
+                    user_id=current_user_id, question_id=question.id
+                ).first()
+                
+                question_data = {
+                    'question_id': question.id,
+                    'question_text': question.text,
+                    'question_order': question.order
+                }
+                
+                if user_answer:
+                    question_data.update({
+                        'correct_words': user_answer.correct_words,
+                        'wrong_words': user_answer.wrong_words,
+                        'percentage': user_answer.percentage,
+                        'correct_words_list': json.loads(user_answer.correct_words_list) if user_answer.correct_words_list else [],
+                        'wrong_words_list': json.loads(user_answer.wrong_words_list) if user_answer.wrong_words_list else [],
+                        'submitted_at': user_answer.submitted_at.isoformat()
+                    })
+                else:
+                    question_data.update({
+                        'correct_words': None,
+                        'wrong_words': None,
+                        'percentage': None,
+                        'correct_words_list': [],
+                        'wrong_words_list': [],
+                        'submitted_at': None
+                    })
+                
+                questions_data.append(question_data)
+            
             videos_data.append({
                 'video_id': video.id,
                 'youtube_link': video.youtube_link,
                 'is_opened': progress.is_opened,
                 'is_completed': progress.is_completed,
-                'correct_words': progress.correct_words,
-                'wrong_words': progress.wrong_words,
-                'percentage': progress.percentage,
-                'correct_words_list': json.loads(progress.correct_words_list) if progress.correct_words_list else [],
-                'wrong_words_list': json.loads(progress.wrong_words_list) if progress.wrong_words_list else []
+                'questions': questions_data
             })
 
         exams = ExamResult.query.filter_by(
@@ -894,7 +1182,7 @@ def get_user_report():
         levels_data.append(level_data)
 
     if output_format == 'json':
-        # Return JSON response (same as original)
+        # Return JSON response
         report = {
             'user': user_data,
             'levels': levels_data
@@ -932,15 +1220,26 @@ Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
 - **Final Exam Score**: {round(level['final_exam_score'], 2) if level['final_exam_score'] is not None else 'Not taken'}
 - **Score Difference**: {round(level['score_difference'], 2) if level['score_difference'] is not None else 'N/A'}
 
-#### Videos
+#### Videos and Questions
 
-| Video ID | Opened | Completed | Correct Words | Wrong Words | Percentage | Correct Words List | Wrong Words List |
-|----------|--------|-----------|---------------|-------------|------------|--------------------|------------------|
 """
             for video in level['videos']:
                 markdown_content += f"""
-| {video['video_id']} | {'Yes' if video['is_opened'] else 'No'} | {'Yes' if video['is_completed'] else 'No'} | {video['correct_words'] if video['correct_words'] is not None else 'N/A'} | {video['wrong_words'] if video['wrong_words'] is not None else 'N/A'} | {round(video['percentage'], 2) if video['percentage'] is not None else 'N/A'} | {', '.join(video['correct_words_list']) if video['correct_words_list'] else 'None'} | {', '.join(video['wrong_words_list']) if video['wrong_words_list'] else 'None'} |
+##### Video ID: {video['video_id']}
+- **YouTube Link**: {video['youtube_link']}
+- **Opened**: {'Yes' if video['is_opened'] else 'No'}
+- **Completed**: {'Yes' if video['is_completed'] else 'No'}
+
+**Questions:**
+
+| Question ID | Text | Order | Correct Words | Wrong Words | Percentage | Correct Words List | Wrong Words List | Submitted At |
+|-------------|------|-------|---------------|-------------|------------|--------------------|------------------|--------------|
 """
+                for question in video['questions']:
+                    markdown_content += f"""
+| {question['question_id']} | {question['question_text'][:50]}... | {question['question_order']} | {question['correct_words'] if question['correct_words'] is not None else 'N/A'} | {question['wrong_words'] if question['wrong_words'] is not None else 'N/A'} | {round(question['percentage'], 2) if question['percentage'] is not None else 'N/A'} | {', '.join(question['correct_words_list']) if question['correct_words_list'] else 'None'} | {', '.join(question['wrong_words_list']) if question['wrong_words_list'] else 'None'} | {question['submitted_at'] if question['submitted_at'] else 'Not submitted'} |
+"""
+
             markdown_content += f"""
 #### Exams
 
@@ -951,12 +1250,14 @@ Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
                 markdown_content += f"""
 | {exam['type'].capitalize()} | {exam['timestamp']} | {exam['correct_words']} | {exam['wrong_words']} | {round(exam['percentage'], 2)} | {', '.join(exam['correct_words_list']) if exam['correct_words_list'] else 'None'} | {', '.join(exam['wrong_words_list']) if exam['wrong_words_list'] else 'None'} |
 """
+        
         # Prepare Markdown response
         response = make_response(markdown_content)
         response.headers['Content-Type'] = 'text/markdown'
         response.headers['Content-Disposition'] = f'inline; filename=user_report_{user.id}.md'
-        return response  # User Progress Routes
+        return response
 
+# User Progress Routes
 @bp.route('/users/<int:user_id>/levels', methods=['GET'])
 @client_required
 def get_user_levels(user_id):
@@ -1147,6 +1448,10 @@ def get_user_statistics(user_id):
     avg_improvement = avg_final_score - \
         avg_initial_score if initial_scores and final_scores else 0
 
+    # Question statistics
+    total_questions_answered = UserQuestionAnswer.query.filter_by(user_id=user_id).count()
+    avg_question_score = db.session.query(db.func.avg(UserQuestionAnswer.percentage)).filter_by(user_id=user_id).scalar() or 0
+
     return jsonify({
         'user_id': user_id,
         'user_name': user.name,
@@ -1156,5 +1461,7 @@ def get_user_statistics(user_id):
         'average_initial_score': round(avg_initial_score, 2),
         'average_final_score': round(avg_final_score, 2),
         'average_improvement': round(avg_improvement, 2),
-        'total_exams_taken': len(exam_results)
+        'total_exams_taken': len(exam_results),
+        'total_questions_answered': total_questions_answered,
+        'average_question_score': round(avg_question_score, 2)
     }), 200
