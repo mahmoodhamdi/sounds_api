@@ -6,7 +6,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, send_from_directory, current_app, make_response
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app import db, bcrypt
-from app.models import User, Level, Video, UserLevel, UserVideoProgress, ExamResult, WelcomeVideo
+from app.models import User, Level, Video, UserLevel, UserVideoProgress, ExamResult, WelcomeVideo, VideoQuestionSubmission
 from app.auth import admin_required, client_required, authenticate_user, create_user_token
 from sqlalchemy.exc import IntegrityError
 
@@ -526,10 +526,27 @@ def add_video_to_level(level_id):
     level = Level.query.get_or_404(level_id)
     data = request.get_json()
 
+    # Process questions to ensure each has a unique ID
+    questions = data.get('questions', [])
+    processed_questions = []
+    
+    for i, question in enumerate(questions):
+        if isinstance(question, dict):
+            # If question already has an ID, keep it; otherwise generate one
+            if 'question_id' not in question:
+                question['question_id'] = f"q_{level_id}_{len(level.videos) + 1}_{i + 1}"
+            processed_questions.append(question)
+        else:
+            # If question is just a string, convert to dict with ID
+            processed_questions.append({
+                'question_id': f"q_{level_id}_{len(level.videos) + 1}_{i + 1}",
+                'question': question
+            })
+
     video = Video(
         level_id=level_id,
         youtube_link=data['youtube_link'],
-        questions=json.dumps(data.get('questions', []))
+        questions=json.dumps(processed_questions)
     )
 
     db.session.add(video)
@@ -538,7 +555,7 @@ def add_video_to_level(level_id):
     return jsonify({
         'id': video.id,
         'youtube_link': video.youtube_link,
-        'questions': json.loads(video.questions) if video.questions else [],
+        'questions': processed_questions,
         'is_opened': False
     }), 201
 
@@ -548,16 +565,32 @@ def update_video(video_id):
     video = Video.query.get_or_404(video_id)
     data = request.get_json()
 
+    # Process questions to ensure each has a unique ID
+    questions = data.get('questions', json.loads(video.questions) if video.questions else [])
+    processed_questions = []
+    
+    for i, question in enumerate(questions):
+        if isinstance(question, dict):
+            # If question already has an ID, keep it; otherwise generate one
+            if 'question_id' not in question:
+                question['question_id'] = f"q_{video.level_id}_{video_id}_{i + 1}"
+            processed_questions.append(question)
+        else:
+            # If question is just a string, convert to dict with ID
+            processed_questions.append({
+                'question_id': f"q_{video.level_id}_{video_id}_{i + 1}",
+                'question': question
+            })
+
     video.youtube_link = data.get('youtube_link', video.youtube_link)
-    video.questions = json.dumps(
-        data.get('questions', json.loads(video.questions) if video.questions else []))
+    video.questions = json.dumps(processed_questions)
 
     db.session.commit()
 
     return jsonify({
         'id': video.id,
         'youtube_link': video.youtube_link,
-        'questions': json.loads(video.questions) if video.questions else []
+        'questions': processed_questions
     }), 200
 
 @bp.route('/videos/<int:video_id>', methods=['DELETE'])
@@ -802,22 +835,68 @@ def submit_video_questions(user_id, level_id, video_id):
     total_words = correct_words + wrong_words
     percentage = (correct_words / total_words * 100) if total_words > 0 else 0
 
-    video_progress.correct_words = correct_words
-    video_progress.wrong_words = wrong_words
-    video_progress.percentage = percentage
-    video_progress.correct_words_list = json.dumps(
-        data.get('correct_words_list', []))
-    video_progress.wrong_words_list = json.dumps(
-        data.get('wrong_words_list', []))
+    # Get the next submission number for this user-video combination
+    last_submission = VideoQuestionSubmission.query.filter_by(
+        user_id=user_id, video_id=video_id
+    ).order_by(VideoQuestionSubmission.submission_number.desc()).first()
+    
+    submission_number = (last_submission.submission_number + 1) if last_submission else 1
 
+    # Create new submission record
+    video_submission = VideoQuestionSubmission(
+        user_id=user_id,
+        level_id=level_id,
+        video_id=video_id,
+        submission_number=submission_number,
+        correct_words=correct_words,
+        wrong_words=wrong_words,
+        percentage=percentage,
+        correct_words_list=json.dumps(data.get('correct_words_list', [])),
+        wrong_words_list=json.dumps(data.get('wrong_words_list', [])),
+        questions_answers=json.dumps(data.get('questions_answers', {}))  # New field for detailed answers
+    )
+
+    db.session.add(video_submission)
     db.session.commit()
 
     return jsonify({
         'message': 'Video questions submitted successfully',
+        'submission_id': video_submission.id,
+        'submission_number': submission_number,
         'correct_words': correct_words,
         'wrong_words': wrong_words,
-        'percentage': percentage
+        'percentage': percentage,
+        'timestamp': video_submission.timestamp.isoformat()
     }), 200
+
+# New route to get video question submissions history
+@bp.route('/users/<int:user_id>/levels/<int:level_id>/videos/<int:video_id>/submissions', methods=['GET'])
+@client_required
+def get_video_question_submissions(user_id, level_id, video_id):
+    current_user_id = int(get_jwt_identity())
+    user = User.query.get(current_user_id)
+    if user.role != 'admin' and current_user_id != user_id:
+        return jsonify({'message': 'Access denied'}), 403
+
+    submissions = VideoQuestionSubmission.query.filter_by(
+        user_id=user_id, level_id=level_id, video_id=video_id
+    ).order_by(VideoQuestionSubmission.timestamp.desc()).all()
+
+    result = []
+    for submission in submissions:
+        result.append({
+            'id': submission.id,
+            'submission_number': submission.submission_number,
+            'correct_words': submission.correct_words,
+            'wrong_words': submission.wrong_words,
+            'percentage': submission.percentage,
+            'correct_words_list': json.loads(submission.correct_words_list) if submission.correct_words_list else [],
+            'wrong_words_list': json.loads(submission.wrong_words_list) if submission.wrong_words_list else [],
+            'questions_answers': json.loads(submission.questions_answers) if submission.questions_answers else {},
+            'timestamp': submission.timestamp.isoformat()
+        })
+
+    return jsonify(result), 200
 
 # Report Route
 @bp.route('/report', methods=['GET'])
@@ -850,16 +929,32 @@ def get_user_report():
 
         for progress in videos_progress:
             video = Video.query.get(progress.video_id)
+            
+            # Get all question submissions for this video
+            question_submissions = VideoQuestionSubmission.query.filter_by(
+                user_id=current_user_id, video_id=video.id
+            ).order_by(VideoQuestionSubmission.timestamp.desc()).all()
+            
+            submissions_data = []
+            for submission in question_submissions:
+                submissions_data.append({
+                    'submission_id': submission.id,
+                    'submission_number': submission.submission_number,
+                    'correct_words': submission.correct_words,
+                    'wrong_words': submission.wrong_words,
+                    'percentage': submission.percentage,
+                    'correct_words_list': json.loads(submission.correct_words_list) if submission.correct_words_list else [],
+                    'wrong_words_list': json.loads(submission.wrong_words_list) if submission.wrong_words_list else [],
+                    'questions_answers': json.loads(submission.questions_answers) if submission.questions_answers else {},
+                    'timestamp': submission.timestamp.isoformat()
+                })
+
             videos_data.append({
                 'video_id': video.id,
                 'youtube_link': video.youtube_link,
                 'is_opened': progress.is_opened,
                 'is_completed': progress.is_completed,
-                'correct_words': progress.correct_words,
-                'wrong_words': progress.wrong_words,
-                'percentage': progress.percentage,
-                'correct_words_list': json.loads(progress.correct_words_list) if progress.correct_words_list else [],
-                'wrong_words_list': json.loads(progress.wrong_words_list) if progress.wrong_words_list else []
+                'question_submissions': submissions_data
             })
 
         exams = ExamResult.query.filter_by(
@@ -894,14 +989,14 @@ def get_user_report():
         levels_data.append(level_data)
 
     if output_format == 'json':
-        # Return JSON response (same as original)
+        # Return JSON response
         report = {
             'user': user_data,
             'levels': levels_data
         }
         return jsonify(report), 200
     else:
-        # Generate Markdown content
+        # Generate Markdown content with enhanced video submissions section
         markdown_content = f"""
 # User Progress Report
 
@@ -934,13 +1029,28 @@ Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
 
 #### Videos
 
-| Video ID | Opened | Completed | Correct Words | Wrong Words | Percentage | Correct Words List | Wrong Words List |
-|----------|--------|-----------|---------------|-------------|------------|--------------------|------------------|
 """
             for video in level['videos']:
                 markdown_content += f"""
-| {video['video_id']} | {'Yes' if video['is_opened'] else 'No'} | {'Yes' if video['is_completed'] else 'No'} | {video['correct_words'] if video['correct_words'] is not None else 'N/A'} | {video['wrong_words'] if video['wrong_words'] is not None else 'N/A'} | {round(video['percentage'], 2) if video['percentage'] is not None else 'N/A'} | {', '.join(video['correct_words_list']) if video['correct_words_list'] else 'None'} | {', '.join(video['wrong_words_list']) if video['wrong_words_list'] else 'None'} |
+##### Video ID: {video['video_id']}
+- **Status**: {'Opened' if video['is_opened'] else 'Not Opened'} | {'Completed' if video['is_completed'] else 'Not Completed'}
+- **YouTube Link**: {video['youtube_link']}
+
+**Question Submissions History:**
+
+| Attempt # | Submission Date | Correct Words | Wrong Words | Percentage | Correct Words | Wrong Words |
+|-----------|----------------|---------------|-------------|------------|---------------|-------------|
 """
+                if video['question_submissions']:
+                    for submission in video['question_submissions']:
+                        correct_words_str = ', '.join(submission['correct_words_list']) if submission['correct_words_list'] else 'None'
+                        wrong_words_str = ', '.join(submission['wrong_words_list']) if submission['wrong_words_list'] else 'None'
+                        markdown_content += f"| {submission['submission_number']} | {submission['timestamp']} | {submission['correct_words']} | {submission['wrong_words']} | {round(submission['percentage'], 2)}% | {correct_words_str} | {wrong_words_str} |\n"
+                else:
+                    markdown_content += "| - | No submissions yet | - | - | - | - | - |\n"
+                
+                markdown_content += "\n"
+
             markdown_content += f"""
 #### Exams
 
@@ -951,12 +1061,14 @@ Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
                 markdown_content += f"""
 | {exam['type'].capitalize()} | {exam['timestamp']} | {exam['correct_words']} | {exam['wrong_words']} | {round(exam['percentage'], 2)} | {', '.join(exam['correct_words_list']) if exam['correct_words_list'] else 'None'} | {', '.join(exam['wrong_words_list']) if exam['wrong_words_list'] else 'None'} |
 """
+        
         # Prepare Markdown response
         response = make_response(markdown_content)
         response.headers['Content-Type'] = 'text/markdown'
         response.headers['Content-Disposition'] = f'inline; filename=user_report_{user.id}.md'
-        return response  # User Progress Routes
+        return response
 
+# User Progress Routes
 @bp.route('/users/<int:user_id>/levels', methods=['GET'])
 @client_required
 def get_user_levels(user_id):
@@ -1158,3 +1270,43 @@ def get_user_statistics(user_id):
         'average_improvement': round(avg_improvement, 2),
         'total_exams_taken': len(exam_results)
     }), 200
+
+# Admin route to get all video question submissions
+@bp.route('/admin/video_question_submissions', methods=['GET'])
+@admin_required
+def get_all_video_question_submissions():
+    user_id = request.args.get('user_id', type=int)
+    level_id = request.args.get('level_id', type=int)
+    video_id = request.args.get('video_id', type=int)
+
+    query = VideoQuestionSubmission.query
+
+    if user_id:
+        query = query.filter_by(user_id=user_id)
+    if level_id:
+        query = query.filter_by(level_id=level_id)
+    if video_id:
+        query = query.filter_by(video_id=video_id)
+
+    submissions = query.order_by(VideoQuestionSubmission.timestamp.desc()).all()
+
+    result = []
+    for submission in submissions:
+        result.append({
+            'id': submission.id,
+            'user_id': submission.user_id,
+            'user_name': submission.user.name if submission.user else '',
+            'level_id': submission.level_id,
+            'level_name': submission.level.name if submission.level else '',
+            'video_id': submission.video_id,
+            'submission_number': submission.submission_number,
+            'correct_words': submission.correct_words,
+            'wrong_words': submission.wrong_words,
+            'percentage': submission.percentage,
+            'correct_words_list': json.loads(submission.correct_words_list) if submission.correct_words_list else [],
+            'wrong_words_list': json.loads(submission.wrong_words_list) if submission.wrong_words_list else [],
+            'questions_answers': json.loads(submission.questions_answers) if submission.questions_answers else {},
+            'timestamp': submission.timestamp.isoformat()
+        })
+
+    return jsonify(result), 200

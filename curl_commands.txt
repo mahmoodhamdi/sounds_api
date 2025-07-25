@@ -1,197 +1,184 @@
-# cURL Commands for Educational App API
+# 1. Serve uploaded file
+curl -X GET {{base}}/Uploads/levels/{{filename}}
 
-# Base URL: Replace with your actual base URL (e.g., http://localhost:5000)
-BASE_URL="http://localhost:5000"
+# 2. Set welcome video (admin)
+curl -X POST {{base}}/welcome_video \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}" \
+-H "Content-Type: application/json" \
+-d '{"video_url": "https://example.com/video"}'
 
-# --- Welcome Video ---
+# 3. Get welcome video
+curl -X GET {{base}}/welcome_video
 
-# Set Welcome Video (Admin)
-curl -X POST "{{base}}/welcome_video" \
-     -H "Content-Type: application/json" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}" \
-     -d '{ "video_url": "https://www.youtube.com/watch?v=welcome123" }'
+# 4. Register
+curl -X POST {{base}}/register \
+-H "Content-Type: application/json" \
+-d '{"name": "John Doe", "email": "john@example.com", "password": "password123", "role": "client", "picture": "https://example.com/pic.jpg"}'
 
-# Get Welcome Video (Any User)
-curl -X GET "{{base}}/welcome_video"
+# 5. Login
+curl -X POST {{base}}/login \
+-H "Content-Type: application/json" \
+-d '{"email": "john@example.com", "password": "password123"}'
 
-# --- Authentication ---
+# For Google login
+curl -X POST {{base}}/login \
+-H "Content-Type: application/json" \
+-d '{"email": "john@example.com", "google": true}'
 
-# Register Admin
-curl -X POST "{{base}}/register" \
-     -H "Content-Type: application/json" \
-     -d '{ "name": "Admin User", "email": "admin@example.com", "password": "admin123", "role": "admin", "picture": "https://example.com/admin.jpg" }'
+# 6. Get user (client)
+curl -X GET {{base}}/users/{{CLIENT_ID}} \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}"
 
-# Register Client
-curl -X POST "{{base}}/register" \
-     -H "Content-Type: application/json" \
-     -d '{ "name": "Client User", "email": "client@example.com", "password": "client123", "role": "client", "picture": "https://example.com/client.jpg" }'
+# 7. Update user (client)
+curl -X PUT {{base}}/users/{{CLIENT_ID}} \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}" \
+-H "Content-Type: application/json" \
+-d '{"name": "New Name", "picture": "https://newpic.com"}'
 
-# Login Admin (set ADMIN_TOKEN and ADMIN_ID from response)
-curl -X POST "{{base}}/login" \
-     -H "Content-Type: application/json" \
-     -d '{ "email": "admin@example.com", "password": "admin123" }'
+# 8. Get all users (admin)
+curl -X GET {{base}}/admin/users \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}"
 
-# Login Client (set CLIENT_TOKEN and CLIENT_ID from response)
-curl -X POST "{{base}}/login" \
-     -H "Content-Type: application/json" \
-     -d '{ "email": "client@example.com", "password": "client123" }'
+# 9. Delete user (admin)
+curl -X DELETE {{base}}/admin/users/{{CLIENT_ID}} \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}"
 
-# Example token/ID placeholders
-# ADMIN_TOKEN="YOUR_ADMIN_JWT_TOKEN_HERE"
-# CLIENT_TOKEN="YOUR_CLIENT_JWT_TOKEN_HERE"
-# ADMIN_ID="1"
-# CLIENT_ID="2"
-# LEVEL_ID="1"
-# VIDEO_ID="1"
+# 10. Reset user password (admin)
+curl -X POST {{base}}/admin/users/{{CLIENT_ID}}/reset_password \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}" \
+-H "Content-Type: application/json" \
+-d '{"new_password": "newpassword123"}'
 
-# --- User Management ---
+# 11. Assign level to user (admin)
+curl -X POST {{base}}/admin/users/{{CLIENT_ID}}/assign_level/{{LEVEL_ID}} \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}"
 
-# Get All Users (Admin)
-curl -X GET "{{base}}/admin/users" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}"
+# 12. Create level (admin)
+curl -X POST {{base}}/levels \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}" \
+-F "name=Level 1" \
+-F "description=Description" \
+-F "level_number=1" \
+-F "welcome_video_url=https://example.com/welcome" \
+-F "price=9.99" \
+-F "initial_exam_question=Question?" \
+-F "final_exam_question=Final Question?" \
+-F "file=@/path/to/image.jpg"
 
-# Get User Details (Admin or Self)
-curl -X GET "{{base}}/users/${CLIENT_ID}" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}"
+# 13. Update level (admin)
+curl -X PUT {{base}}/levels/{{LEVEL_ID}} \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}" \
+-F "name=Updated Level" \
+-F "description=Updated Description" \
+-F "level_number=1" \
+-F "welcome_video_url=https://example.com/updated" \
+-F "price=19.99" \
+-F "initial_exam_question=Updated Question?" \
+-F "final_exam_question=Updated Final Question?" \
+-F "file=@/path/to/new_image.jpg"
 
-# Update User (Admin or Self)
-curl -X PUT "{{base}}/users/${CLIENT_ID}" \
-     -H "Content-Type: application/json" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}" \
-     -d '{ "name": "Updated Client Name", "picture": "https://example.com/updated_client.jpg", "role": "client" }'
+# 14. Delete level (admin)
+curl -X DELETE {{base}}/levels/{{LEVEL_ID}} \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}"
 
-# Delete User (Admin)
-curl -X DELETE "{{base}}/admin/users/${CLIENT_ID}" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}"
- 
+# 15. Get levels (admin or client)
+curl -X GET {{base}}/levels \
+-H "Authorization: Bearer {{TOKEN}}"
 
-# Assign Level to User (Admin)
-curl -X POST "{{base}}/admin/users/${CLIENT_ID}/assign_level/${LEVEL_ID}" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}"
+# 16. Admin get all levels (admin)
+curl -X GET {{base}}/admin/levels \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}"
 
-# --- Level Management ---
+# 17. Get level (client)
+curl -X GET {{base}}/levels/{{LEVEL_ID}} \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}"
 
-# Create Level (Admin)
-     curl -X POST "{{base}}/levels" \
-          -H "Authorization: Bearer {{ADMIN_TOKEN}}" \
-          -F "name=Sample Level" \
-          -F "description=A description for the sample level." \
-          -F "level_number=1" \
-          -F "welcome_video_url=https://www.youtube.com/watch?v=sample_welcome" \
-          -F "price=19.99" \
-          -F "initial_exam_question=What is the capital of France?" \
-          -F "final_exam_question=Summarize the key concepts of this level." \
-          -F "file=@/path/to/your/image.jpg"
+# 18. Add video to level (admin)
+curl -X POST {{base}}/levels/{{LEVEL_ID}}/videos \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}" \
+-H "Content-Type: application/json" \
+-d '{"youtube_link": "https://youtube.com/video", "questions": [{"question_id": "q1", "question": "What is 2+2?"}, {"question_id": "q2", "question": "What is the capital of France?"}]}'
 
-# Get All Levels with Filters (Client)
-curl -X GET "{{base}}/levels?min_price=10&max_price=50&level_number=1&name=Sample" \
-     -H "Authorization: Bearer ${CLIENT_TOKEN}"
+# 19. Update video (admin)
+curl -X PUT {{base}}/videos/{{VIDEO_ID}} \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}" \
+-H "Content-Type: application/json" \
+-d '{"youtube_link": "https://youtube.com/updated", "questions": [{"question_id": "q1", "question": "What is 3+3?"}, {"question_id": "q3", "question": "What is the largest planet?"}]}'
 
-# Get All Levels with Price Filter (Client)
-curl -X GET "{{base}}/levels?min_price=20&max_price=100" \
-     -H "Authorization: Bearer ${CLIENT_TOKEN}"
+# 20. Delete video (admin)
+curl -X DELETE {{base}}/videos/{{VIDEO_ID}} \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}"
 
-# Get All Levels by Name (Client)
-curl -X GET "{{base}}/levels?name=Basic" \
-     -H "Authorization: Bearer ${CLIENT_TOKEN}"
+# 21. Get all videos (admin)
+curl -X GET {{base}}/admin/videos \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}"
 
-# Get All Levels by Level Number (Client)
-curl -X GET "{{base}}/levels?level_number=2" \
-     -H "Authorization: Bearer ${CLIENT_TOKEN}"
+# 22. Complete video (client)
+curl -X PATCH {{base}}/users/{{CLIENT_ID}}/levels/{{LEVEL_ID}}/videos/{{VIDEO_ID}}/complete \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}"
 
-# Get All Levels (Admin)
-curl -X GET "{{base}}/admin/levels" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}"
+# 23. Submit initial exam (client)
+curl -X POST {{base}}/exams/{{LEVEL_ID}}/initial \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}" \
+-H "Content-Type: application/json" \
+-d '{"correct_words": 10, "wrong_words": 2, "correct_words_list": ["word1", "word2"], "wrong_words_list": ["word3"]}'
 
-# Get All Levels with Filters (Admin)
-curl -X GET "{{base}}/admin/levels?min_price=10&max_price=50&level_number=1&name=Sample" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}"
+# 24. Submit final exam (client)
+curl -X POST {{base}}/exams/{{LEVEL_ID}}/final \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}" \
+-H "Content-Type: application/json" \
+-d '{"correct_words": 15, "wrong_words": 1, "correct_words_list": ["word4", "word5"], "wrong_words_list": ["word6"]}'
 
-# Get Single Level (Client)
-curl -X GET "{{base}}/levels/${LEVEL_ID}" \
-     -H "Authorization: Bearer ${CLIENT_TOKEN}"
+# 25. Get user exam results (client)
+curl -X GET {{base}}/exams/{{LEVEL_ID}}/user/{{CLIENT_ID}} \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}"
 
-# Update Level (Admin)
-curl -X PUT "{{base}}/levels/${LEVEL_ID}" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}" \
-     -F "name=Updated Sample Level" \
-     -F "description=An updated description for the sample level." \
-     -F "level_number=1" \
-     -F "price=24.99" \
-     -F "file=@/path/to/your/updated_image.jpg"
+# 26. Get all exam results (admin)
+curl -X GET {{base}}/admin/exams \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}"
 
-# Delete Level (Admin)
-curl -X DELETE "{{base}}/levels/${LEVEL_ID}" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}"
+# 27. Submit video questions (client)
+curl -X POST {{base}}/users/{{CLIENT_ID}}/levels/{{LEVEL_ID}}/videos/{{VIDEO_ID}}/submit_questions \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}" \
+-H "Content-Type: application/json" \
+-d '{"correct_words": 5, "wrong_words": 1, "correct_words_list": ["word7", "word8"], "wrong_words_list": ["word9"], "questions_answers": {"q1": "4", "q2": "Paris"}}'
 
-# --- Video Management ---
+# 28. Get user report (client)
+curl -X GET {{base}}/report \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}"
 
-# Add Video to Level (Admin)
-curl -X POST "{{base}}/levels/${LEVEL_ID}/videos" \
-     -H "Content-Type: application/json" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}" \
-     -d '{ "youtube_link": "https://www.youtube.com/watch?v=video_one", "questions": ["Question 1 for video one", "Question 2 for video one"] }'
+# For markdown format
+curl -X GET {{base}}/report?format=markdown \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}"
 
-# Update Video (Admin)
-curl -X PUT "{{base}}/videos/${VIDEO_ID}" \
-     -H "Content-Type: application/json" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}" \
-     -d '{ "youtube_link": "https://www.youtube.com/watch?v=video_one_updated", "questions": ["Updated Question 1", "Updated Question 2"] }'
+# 29. Get user levels (client)
+curl -X GET {{base}}/users/{{CLIENT_ID}}/levels \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}"
 
-# Delete Video (Admin)
-curl -X DELETE "{{base}}/videos/${VIDEO_ID}" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}"
+# 30. Purchase level (client)
+curl -X POST {{base}}/users/{{CLIENT_ID}}/levels/{{LEVEL_ID}}/purchase \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}"
 
-# Get All Videos (Admin)
-curl -X GET "{{base}}/admin/videos" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}"
+# 31. Update level progress (client)
+curl -X PATCH {{base}}/users/{{CLIENT_ID}}/levels/{{LEVEL_ID}}/update_progress \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}"
 
-# --- Exams ---
+# 32. Get admin statistics (admin)
+curl -X GET {{base}}/admin/statistics \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}"
 
-# Submit Initial Exam (Client)
-curl -X POST "{{base}}/exams/${LEVEL_ID}/initial" \
-     -H "Content-Type: application/json" \
-     -H "Authorization: Bearer ${CLIENT_TOKEN}" \
-     -d '{ "correct_words": 15, "wrong_words": 5 }'
+# 33. Get user statistics (admin)
+curl -X GET {{base}}/admin/users/{{CLIENT_ID}}/statistics \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}"
 
-# Submit Final Exam (Client)
-curl -X POST "{{base}}/exams/${LEVEL_ID}/final" \
-     -H "Content-Type: application/json" \
-     -H "Authorization: Bearer ${CLIENT_TOKEN}" \
-     -d '{ "correct_words": 18, "wrong_words": 2 }'
+# 34. Get video question submissions (client)
+curl -X GET {{base}}/users/{{CLIENT_ID}}/levels/{{LEVEL_ID}}/videos/{{VIDEO_ID}}/submissions \
+-H "Authorization: Bearer {{CLIENT_TOKEN}}"
 
-# Get User Exam Results (Client or Admin)
-curl -X GET "{{base}}/exams/${LEVEL_ID}/user/${CLIENT_ID}" \
-     -H "Authorization: Bearer ${CLIENT_TOKEN}"
+# 35. Get all video question submissions (admin)
+curl -X GET {{base}}/admin/video_question_submissions \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}"
 
-# Get All Exam Results (Admin)
-curl -X GET "{{base}}/admin/exams" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}"
-
-# --- Progress Tracking ---
-
-# Get User's Purchased Levels (Client or Admin)
-curl -X GET "{{base}}/users/${CLIENT_ID}/levels" \
-     -H "Authorization: Bearer ${CLIENT_TOKEN}"
-
-# Purchase Level (Client or Admin)
-curl -X POST "{{base}}/users/${CLIENT_ID}/levels/${LEVEL_ID}/purchase" \
-     -H "Authorization: Bearer ${CLIENT_TOKEN}"
-
-# Complete Video (Client or Admin)
-curl -X PATCH "{{base}}/users/${CLIENT_ID}/levels/${LEVEL_ID}/videos/${VIDEO_ID}/complete" \
-     -H "Authorization: Bearer ${CLIENT_TOKEN}"
-
-# Update Level Progress (Client or Admin)
-curl -X PATCH "{{base}}/users/${CLIENT_ID}/levels/${LEVEL_ID}/update_progress" \
-     -H "Authorization: Bearer ${CLIENT_TOKEN}"
-
-# --- Statistics (Admin Only) ---
-
-# Get Admin Statistics
-curl -X GET "{{base}}/admin/statistics" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}"
-
-# Get User Statistics (Admin)
-curl -X GET "{{base}}/admin/users/${CLIENT_ID}/statistics" \
-     -H "Authorization: Bearer {{ADMIN_TOKEN}}"
+# With query parameters
+curl -X GET {{base}}/admin/video_question_submissions?user_id={{CLIENT_ID}}&level_id={{LEVEL_ID}}&video_id={{VIDEO_ID}} \
+-H "Authorization: Bearer {{ADMIN_TOKEN}}"
