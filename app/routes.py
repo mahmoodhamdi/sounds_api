@@ -10,7 +10,7 @@ from app.models import User, Level, Video, UserLevel, UserVideoProgress, ExamRes
 from app.auth import admin_required, client_required, authenticate_user, create_user_token
 from sqlalchemy.exc import IntegrityError
 
-bp = Blueprint('main', _name_)
+bp = Blueprint('main', __name__)
 
 # Serve uploaded files
 @bp.route('/Uploads/levels/<filename>')
@@ -26,7 +26,7 @@ def admin_or_client_required(f):
         if user.role not in ['admin', 'client']:
             return jsonify({'message': 'Access denied'}), 403
         return f(*args, **kwargs)
-    wrapper._name_ = f._name_
+    wrapper.__name__ = f.__name__
     return wrapper
 
 # Welcome Video Management Routes
@@ -1257,65 +1257,88 @@ Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
         response.headers['Content-Disposition'] = f'inline; filename=user_report_{user.id}.md'
         return response
 
-# User Progress Routes
+
 @bp.route('/users/<int:user_id>/levels', methods=['GET'])
 @client_required
 def get_user_levels(user_id):
     current_user_id = int(get_jwt_identity())
-
     user = User.query.get(current_user_id)
+    
+    # Access control: only admins or the user themselves can access
     if user.role != 'admin' and current_user_id != user_id:
         return jsonify({'message': 'Access denied'}), 403
 
     user_levels = UserLevel.query.filter_by(user_id=user_id).all()
-
     result = []
+
     for user_level in user_levels:
         level = user_level.level
-
-        videos_progress = []
         completed_videos_count = 0
+        videos = []
 
+        # Process each video in the level
         for video in level.videos:
             video_progress = UserVideoProgress.query.filter_by(
                 user_level_id=user_level.id,
                 video_id=video.id
             ).first()
 
-            if video_progress:
-                videos_progress.append({
-                    'video_id': video.id,
-                    'is_opened': video_progress.is_opened,
-                    'is_completed': video_progress.is_completed
-                })
-                if video_progress.is_completed:
-                    completed_videos_count += 1
-            else:
-                videos_progress.append({
-                    'video_id': video.id,
-                    'is_opened': False,
-                    'is_completed': False
-                })
+            is_opened = video_progress.is_opened if video_progress else False
+            is_completed = video_progress.is_completed if video_progress else False
+            if is_completed:
+                completed_videos_count += 1
 
+            # Fetch questions and user answers
+            questions_data = []
+            if user.role == 'admin' or is_opened:
+                questions = Question.query.filter_by(video_id=video.id).order_by(Question.order).all()
+                for question in questions:
+                    user_answer = UserQuestionAnswer.query.filter_by(
+                        user_id=user_id, question_id=question.id
+                    ).first()
+                    question_data = {
+                        'id': question.id,
+                        'order': question.order,
+                        'text': question.text
+                    }
+                    if user_answer:
+                        question_data['user_answer'] = {
+                            'correct_words': user_answer.correct_words,
+                            'wrong_words': user_answer.wrong_words,
+                            'percentage': user_answer.percentage,
+                            'submitted_at': user_answer.submitted_at.isoformat()
+                        }
+                    questions_data.append(question_data)
+
+            # Video data with conditional YouTube link
+            video_data = {
+                'id': video.id,
+                'youtube_link': video.youtube_link if user.role == 'admin' or is_opened else '',
+                'is_opened': is_opened,
+                'is_completed': is_completed,
+                'questions': questions_data
+            }
+            videos.append(video_data)
+
+        # Level data with new fields
         level_data = {
             'user_id': user_id,
             'level_id': level.id,
             'level_name': level.name,
             'level_number': level.level_number,
+            'welcome_video_url': level.welcome_video_url,
+            'videos_count': len(level.videos),
             'completed_videos_count': completed_videos_count,
-            'total_videos_count': len(level.videos),
-            'videos_progress': videos_progress,
+            'videos': videos,
             'is_completed': user_level.is_completed,
             'can_take_final_exam': user_level.can_take_final_exam,
             'initial_exam_score': user_level.initial_exam_score,
             'final_exam_score': user_level.final_exam_score,
             'score_difference': user_level.score_difference
         }
-
         result.append(level_data)
 
     return jsonify(result), 200
-
 @bp.route('/users/<int:user_id>/levels/<int:level_id>/purchase', methods=['POST'])
 @client_required
 def purchase_level(user_id, level_id):
