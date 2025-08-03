@@ -3,6 +3,8 @@ from flask import jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity, create_access_token
 from app.models import User
 from app import bcrypt
+from app.localization import LocalizationHelper
+from app.validation import ValidationHelper
 
 def admin_required(f):
     @wraps(f)
@@ -11,7 +13,8 @@ def admin_required(f):
         current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
         if not user or user.role != 'admin':
-            return jsonify({'message': 'Admin access required'}), 403
+            lang = ValidationHelper.get_language_from_request()
+            return LocalizationHelper.get_error_response('admin_access_required', lang, 403)
         return f(*args, **kwargs)
     return decorated_function
 
@@ -22,7 +25,8 @@ def client_required(f):
         current_user_id = get_jwt_identity()
         user = User.query.get(current_user_id)
         if not user:
-            return jsonify({'message': 'Authentication required'}), 401
+            lang = ValidationHelper.get_language_from_request()
+            return LocalizationHelper.get_error_response('authentication_required', lang, 401)
         return f(*args, **kwargs)
     return decorated_function
 
@@ -34,4 +38,3 @@ def authenticate_user(email, password):
 
 def create_user_token(user):
     return create_access_token(identity=str(user.id))
-
