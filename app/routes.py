@@ -1,3 +1,14 @@
+from flask import send_file
+from io import BytesIO
+import pandas as pd
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+import tempfile
 import json
 import os
 import uuid
@@ -1494,3 +1505,364 @@ def get_user_statistics(user_id):
         'average_question_score': round(avg_question_score, 2)
     }
     return LocalizationHelper.get_success_response('operation_successful', response_data, lang, status_code=200)
+
+
+
+@bp.route('/admin/users/export', methods=['GET'])
+@admin_required
+def export_users_excel():
+    """Export all users data to Excel file"""
+    lang = ValidationHelper.get_language_from_request()
+    
+    try:
+        # Get all users with their level information
+        users = User.query.all()
+        
+        # Prepare data for Excel
+        users_data = []
+        for user in users:
+            user_levels = UserLevel.query.filter_by(user_id=user.id).all()
+            
+            # Calculate user statistics
+            total_levels = len(user_levels)
+            completed_levels = sum(1 for ul in user_levels if ul.is_completed)
+            completion_rate = (completed_levels / total_levels * 100) if total_levels > 0 else 0
+            
+            # Get exam scores
+            exam_results = ExamResult.query.filter_by(user_id=user.id).all()
+            initial_scores = [exam.percentage for exam in exam_results if exam.type == 'initial']
+            final_scores = [exam.percentage for exam in exam_results if exam.type == 'final']
+            
+            avg_initial_score = sum(initial_scores) / len(initial_scores) if initial_scores else 0
+            avg_final_score = sum(final_scores) / len(final_scores) if final_scores else 0
+            avg_improvement = avg_final_score - avg_initial_score if initial_scores and final_scores else 0
+            
+            # Get questions answered
+            total_questions = UserQuestionAnswer.query.filter_by(user_id=user.id).count()
+            avg_question_score = db.session.query(db.func.avg(UserQuestionAnswer.percentage)).filter_by(user_id=user.id).scalar() or 0
+            
+            users_data.append({
+                'User ID': user.id,
+                'Name': user.name,
+                'Email': user.email,
+                'Phone': user.phone or 'N/A',
+                'Role': user.role.capitalize(),
+                'Total Levels Purchased': total_levels,
+                'Levels Completed': completed_levels,
+                'Completion Rate (%)': round(completion_rate, 2),
+                'Average Initial Exam Score': round(avg_initial_score, 2),
+                'Average Final Exam Score': round(avg_final_score, 2),
+                'Average Improvement': round(avg_improvement, 2),
+                'Total Exams Taken': len(exam_results),
+                'Total Questions Answered': total_questions,
+                'Average Question Score': round(avg_question_score, 2),
+                'Registration Date': 'N/A'  # Add if you have created_at field
+            })
+        
+        # Create DataFrame
+        df = pd.DataFrame(users_data)
+        
+        # Create Excel file in memory
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Users summary sheet
+            df.to_excel(writer, sheet_name='Users Summary', index=False)
+            
+            # Detailed levels sheet
+            levels_data = []
+            for user in users:
+                user_levels = UserLevel.query.filter_by(user_id=user.id).all()
+                for user_level in user_levels:
+                    level = user_level.level
+                    levels_data.append({
+                        'User ID': user.id,
+                        'User Name': user.name,
+                        'User Email': user.email,
+                        'Level ID': level.id,
+                        'Level Name': level.name,
+                        'Level Number': level.level_number,
+                        'Level Price': level.price,
+                        'Is Completed': 'Yes' if user_level.is_completed else 'No',
+                        'Can Take Final Exam': 'Yes' if user_level.can_take_final_exam else 'No',
+                        'Initial Exam Score': user_level.initial_exam_score or 'N/A',
+                        'Final Exam Score': user_level.final_exam_score or 'N/A',
+                        'Score Difference': user_level.score_difference or 'N/A'
+                    })
+            
+            if levels_data:
+                levels_df = pd.DataFrame(levels_data)
+                levels_df.to_excel(writer, sheet_name='User Levels Detail', index=False)
+            
+            # Exam results sheet
+            exam_results = ExamResult.query.all()
+            exam_data = []
+            for exam in exam_results:
+                exam_data.append({
+                    'User ID': exam.user_id,
+                    'User Name': exam.user.name if exam.user else 'N/A',
+                    'Level ID': exam.level_id,
+                    'Level Name': exam.level.name if exam.level else 'N/A',
+                    'Exam Type': exam.type.capitalize(),
+                    'Correct Words': exam.correct_words,
+                    'Wrong Words': exam.wrong_words,
+                    'Percentage': exam.percentage,
+                    'Date': exam.timestamp.strftime('%Y-%m-%d %H:%M:%S')
+                })
+            
+            if exam_data:
+                exam_df = pd.DataFrame(exam_data)
+                exam_df.to_excel(writer, sheet_name='Exam Results', index=False)
+        
+        output.seek(0)
+        
+        # Generate filename with timestamp
+        filename = f"users_export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        return LocalizationHelper.get_error_response('operation_failed', lang, 500)
+
+@bp.route('/report/pdf', methods=['GET'])
+@client_required
+def get_user_report_pdf():
+    """Generate and download user progress report as PDF"""
+    current_user_id = int(get_jwt_identity())
+    lang = ValidationHelper.get_language_from_request()
+    
+    user = User.query.get(current_user_id)
+    if not user:
+        return LocalizationHelper.get_error_response('user_not_found', lang, 404)
+    
+    try:
+        # Create temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+        temp_filename = temp_file.name
+        temp_file.close()
+        
+        # Create PDF document
+        doc = SimpleDocTemplate(temp_filename, pagesize=A4)
+        styles = getSampleStyleSheet()
+        story = []
+        
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            spaceAfter=30,
+            alignment=TA_CENTER,
+            textColor=colors.darkblue
+        )
+        
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=16,
+            spaceAfter=12,
+            textColor=colors.darkblue
+        )
+        
+        subheading_style = ParagraphStyle(
+            'CustomSubHeading',
+            parent=styles['Heading3'],
+            fontSize=14,
+            spaceAfter=10,
+            textColor=colors.blue
+        )
+        
+        # Title
+        story.append(Paragraph("User Progress Report", title_style))
+        story.append(Spacer(1, 20))
+        
+        # Report info
+        report_info = f"Generated on {datetime.utcnow().strftime('%B %d, %Y at %H:%M UTC')}"
+        story.append(Paragraph(report_info, styles['Normal']))
+        story.append(Spacer(1, 30))
+        
+        # User Information Section
+        story.append(Paragraph("User Information", heading_style))
+        
+        user_data = [
+            ['Name', user.name],
+            ['Email', user.email],
+            ['Phone', user.phone or 'Not provided'],
+            ['User ID', str(user.id)],
+            ['Role', user.role.capitalize()]
+        ]
+        
+        user_table = Table(user_data, colWidths=[2*inch, 4*inch])
+        user_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightblue),
+            ('TEXTCOLOR', (0, 0), (0, -1), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+            ('BACKGROUND', (1, 0), (1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        story.append(user_table)
+        story.append(Spacer(1, 30))
+        
+        # Levels Progress Section
+        story.append(Paragraph("Levels Progress", heading_style))
+        
+        user_levels = UserLevel.query.filter_by(user_id=current_user_id).all()
+        
+        if not user_levels:
+            story.append(Paragraph("No levels enrolled.", styles['Normal']))
+        else:
+            for i, user_level in enumerate(user_levels):
+                level = user_level.level
+                
+                # Level header
+                level_title = f"Level {level.level_number}: {level.name}"
+                story.append(Paragraph(level_title, subheading_style))
+                
+                # Level info table
+                level_info = [
+                    ['Description', level.description or 'No description'],
+                    ['Status', 'Completed' if user_level.is_completed else 'In Progress'],
+                    ['Can Take Final Exam', 'Yes' if user_level.can_take_final_exam else 'No'],
+                    ['Initial Exam Score', f"{user_level.initial_exam_score:.2f}%" if user_level.initial_exam_score is not None else 'Not taken'],
+                    ['Final Exam Score', f"{user_level.final_exam_score:.2f}%" if user_level.final_exam_score is not None else 'Not taken'],
+                    ['Score Improvement', f"{user_level.score_difference:.2f}%" if user_level.score_difference is not None else 'N/A']
+                ]
+                
+                level_table = Table(level_info, colWidths=[2*inch, 4*inch])
+                level_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 9),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                ]))
+                
+                story.append(level_table)
+                story.append(Spacer(1, 15))
+                
+                # Videos and Questions Summary
+                videos_progress = UserVideoProgress.query.filter_by(user_level_id=user_level.id).all()
+                
+                if videos_progress:
+                    story.append(Paragraph("Videos Progress:", styles['Heading4']))
+                    
+                    video_data = [['Video ID', 'Status', 'Questions Answered', 'Avg Score']]
+                    
+                    for progress in videos_progress:
+                        video = Video.query.get(progress.video_id)
+                        questions = Question.query.filter_by(video_id=video.id).all()
+                        
+                        answered_questions = 0
+                        total_score = 0
+                        
+                        for question in questions:
+                            answer = UserQuestionAnswer.query.filter_by(
+                                user_id=current_user_id, question_id=question.id
+                            ).first()
+                            if answer:
+                                answered_questions += 1
+                                total_score += answer.percentage
+                        
+                        avg_score = (total_score / answered_questions) if answered_questions > 0 else 0
+                        status = 'Completed' if progress.is_completed else ('Opened' if progress.is_opened else 'Locked')
+                        
+                        video_data.append([
+                            str(video.id),
+                            status,
+                            f"{answered_questions}/{len(questions)}",
+                            f"{avg_score:.1f}%" if answered_questions > 0 else 'N/A'
+                        ])
+                    
+                    video_table = Table(video_data, colWidths=[1*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+                    video_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 8),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                    ]))
+                    
+                    story.append(video_table)
+                    story.append(Spacer(1, 20))
+                
+                # Exam Results for this level
+                exams = ExamResult.query.filter_by(user_id=current_user_id, level_id=level.id).all()
+                
+                if exams:
+                    story.append(Paragraph("Exam Results:", styles['Heading4']))
+                    
+                    exam_data = [['Type', 'Date', 'Correct Words', 'Wrong Words', 'Score']]
+                    
+                    for exam in exams:
+                        exam_data.append([
+                            exam.type.capitalize(),
+                            exam.timestamp.strftime('%Y-%m-%d'),
+                            str(exam.correct_words),
+                            str(exam.wrong_words),
+                            f"{exam.percentage:.2f}%"
+                        ])
+                    
+                    exam_table = Table(exam_data, colWidths=[1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch])
+                    exam_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.darkgreen),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 8),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                    ]))
+                    
+                    story.append(exam_table)
+                
+                # Add page break between levels (except for the last one)
+                if i < len(user_levels) - 1:
+                    story.append(PageBreak())
+        
+        # Build PDF
+        doc.build(story)
+        
+        # Send file
+        filename = f"progress_report_{user.id}_{datetime.utcnow().strftime('%Y%m%d')}.pdf"
+        
+        def remove_file(response):
+            try:
+                os.unlink(temp_filename)
+            except Exception:
+                pass
+            return response
+        
+        response = send_file(
+            temp_filename,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+        # Clean up temp file after sending
+        response.call_on_close(lambda: os.unlink(temp_filename) if os.path.exists(temp_filename) else None)
+        
+        return response
+        
+    except Exception as e:
+        # Clean up temp file on error
+        try:
+            if 'temp_filename' in locals() and os.path.exists(temp_filename):
+                os.unlink(temp_filename)
+        except:
+            pass
+        
+        return LocalizationHelper.get_error_response('operation_failed', lang, 500)
