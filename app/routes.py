@@ -77,6 +77,7 @@ def register():
         name=data['name'],
         email=data['email'],
         password=hashed_password,
+        phone=data.get('phone'),  # Added phone number - can be null
         role=data.get('role', 'client'),
         picture=data.get('picture', '')
     )
@@ -90,6 +91,7 @@ def register():
         'id': user.id,
         'name': user.name,
         'email': user.email,
+        'phone': user.phone,
         'role': user.role,
         'picture': user.picture,
         'token': token
@@ -118,12 +120,12 @@ def login():
         'id': user.id,
         'name': user.name,
         'email': user.email,
+        'phone': user.phone,
         'role': user.role,
         'picture': user.picture,
         'token': token
     }
     return LocalizationHelper.get_success_response('operation_successful', response_data, lang, status_code=200)
-
 # User Management Routes
 @bp.route('/users/<int:user_id>', methods=['GET'])
 @client_required
@@ -141,12 +143,14 @@ def get_user(user_id):
         'id': target_user.id,
         'name': target_user.name,
         'email': target_user.email,
+        'phone': target_user.phone,
         'role': target_user.role,
         'picture': target_user.picture
     }
     return LocalizationHelper.get_success_response('operation_successful', response_data, lang, status_code=200)
 
-@bp.route('/users/<int:user_id>', methods=['PUT'])
+# Updated User PATCH Route (instead of PUT)
+@bp.route('/users/<int:user_id>', methods=['PATCH'])
 @client_required
 def update_user(user_id):
     current_user_id = int(get_jwt_identity())
@@ -159,11 +163,17 @@ def update_user(user_id):
     target_user = User.query.get_or_404(user_id)
     data = request.get_json()
 
-    target_user.name = data.get('name', target_user.name)
-    target_user.picture = data.get('picture', target_user.picture)
+    # Update only provided fields
+    if 'name' in data:
+        target_user.name = data['name']
+    if 'phone' in data:
+        target_user.phone = data['phone']
+    if 'picture' in data:
+        target_user.picture = data['picture']
 
-    if user.role == 'admin':
-        target_user.role = data.get('role', target_user.role)
+    # Only admin can update role
+    if user.role == 'admin' and 'role' in data:
+        target_user.role = data['role']
 
     db.session.commit()
 
@@ -171,6 +181,7 @@ def update_user(user_id):
         'id': target_user.id,
         'name': target_user.name,
         'email': target_user.email,
+        'phone': target_user.phone,
         'role': target_user.role,
         'picture': target_user.picture
     }
@@ -185,6 +196,7 @@ def get_all_users():
         'id': user.id,
         'name': user.name,
         'email': user.email,
+        'phone': user.phone,
         'role': user.role,
         'picture': user.picture,
         'level_count': len(user.levels)
@@ -1086,6 +1098,7 @@ def get_all_exam_results():
     return LocalizationHelper.get_success_response('operation_successful', {'exam_results': result}, lang, status_code=200)
 
 # Report Route
+# Updated Report Route
 @bp.route('/report', methods=['GET'])
 @client_required
 def get_user_report():
@@ -1101,6 +1114,7 @@ def get_user_report():
         'id': user.id,
         'name': user.name,
         'email': user.email,
+        'phone': user.phone or 'Not provided',
         'role': user.role,
         'picture': user.picture or 'Not set'
     }
@@ -1200,6 +1214,7 @@ Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
 
 - *Name*: {user_data['name']}
 - *Email*: {user_data['email']}
+- *Phone*: {user_data['phone']}
 - *User ID*: {user_data['id']}
 - *Role*: {user_data['role'].capitalize()}
 - *Picture*: {user_data['picture']}

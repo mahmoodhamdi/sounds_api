@@ -13,6 +13,7 @@ class User(db.Model):
     name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(60), nullable=False)
+    phone = db.Column(db.String(20), nullable=True)  # New phone number column
     role = db.Column(db.String(20), default='client') # 'admin' or 'client'
     picture = db.Column(db.String(200), nullable=True)
     levels = db.relationship('UserLevel', backref='user', lazy=True)
