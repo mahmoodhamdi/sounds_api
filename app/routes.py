@@ -1,34 +1,86 @@
-from flask import send_file
+# === Imports: Built-in ===
+import json
+import os
+import tempfile
+import uuid
+from datetime import datetime
 from io import BytesIO
+
+# === Imports: Third-party ===
+import matplotlib
+
+matplotlib.use("Agg")  # Use non-interactive backend
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import pandas as pd
+import seaborn as sns
+from flask import (
+    Blueprint,
+    request,
+    jsonify,
+    send_from_directory,
+    current_app,
+    make_response,
+    send_file,
+)
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from reportlab.graphics import renderPDF
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.charts.legends import Legend
+from reportlab.graphics.charts.linecharts import HorizontalLineChart
+from reportlab.graphics.charts.piecharts import Pie
+from reportlab.graphics.shapes import Drawing
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.colors import Color, HexColor
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.pagesizes import A4, letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-import tempfile
-import json
-import os
-import uuid
-from werkzeug.utils import secure_filename
-from datetime import datetime
-from flask import Blueprint, request, jsonify, send_from_directory, current_app, make_response
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from app import db, bcrypt
-from app.models import User, Level, Video, UserLevel, UserVideoProgress, ExamResult, WelcomeVideo, Question, UserQuestionAnswer
-from app.auth import admin_required, client_required, authenticate_user, create_user_token
-from app.localization import LocalizationHelper
-from app.validation import ValidationHelper
+from reportlab.platypus import (
+    Image,
+    KeepTogether,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    SimpleDocTemplate,
+    PageBreak,
+)
 from sqlalchemy.exc import IntegrityError
+from werkzeug.utils import secure_filename
 
-bp = Blueprint('main', __name__)
+# === Imports: Local Application ===
+from app import db, bcrypt
+from app.auth import (
+    admin_required,
+    client_required,
+    authenticate_user,
+    create_user_token,
+)
+from app.localization import LocalizationHelper
+from app.models import (
+    User,
+    Level,
+    Video,
+    UserLevel,
+    UserVideoProgress,
+    ExamResult,
+    WelcomeVideo,
+    Question,
+    UserQuestionAnswer,
+)
+from app.validation import ValidationHelper
+
+
+bp = Blueprint("main", __name__)
+
 
 # Serve uploaded files
-@bp.route('/Uploads/levels/<filename>')
+@bp.route("/Uploads/levels/<filename>")
 def serve_uploaded_file(filename):
-    return send_from_directory(current_app.config['UPLOAD_FOLDER'], filename)
+    return send_from_directory(current_app.config["UPLOAD_FOLDER"], filename)
+
 
 # Custom decorator to allow both admin and client roles
 def admin_or_client_required(f):
@@ -37,60 +89,72 @@ def admin_or_client_required(f):
         current_user_id = int(get_jwt_identity())
         user = User.query.get(current_user_id)
         lang = ValidationHelper.get_language_from_request()
-        if user.role not in ['admin', 'client']:
-            return LocalizationHelper.get_error_response('access_denied', lang, 403)
+        if user.role not in ["admin", "client"]:
+            return LocalizationHelper.get_error_response("access_denied", lang, 403)
         return f(*args, **kwargs)
+
     wrapper.__name__ = f.__name__
     return wrapper
 
+
 # Welcome Video Management Routes
-@bp.route('/welcome_video', methods=['POST'])
+@bp.route("/welcome_video", methods=["POST"])
 @admin_required
 def set_welcome_video():
     lang = ValidationHelper.get_language_from_request()
     data = request.get_json()
-    video_url = data.get('video_url')
+    video_url = data.get("video_url")
 
     if not video_url:
-        return LocalizationHelper.get_error_response('required_field', lang, 400, field='Video URL')
+        return LocalizationHelper.get_error_response(
+            "required_field", lang, 400, field="Video URL"
+        )
 
     WelcomeVideo.query.delete()
     welcome_video = WelcomeVideo(video_url=video_url)
     db.session.add(welcome_video)
     db.session.commit()
 
-    response_data = {'video_url': video_url}
-    return LocalizationHelper.get_success_response('welcome_video_set', response_data, lang, status_code=200)
+    response_data = {"video_url": video_url}
+    return LocalizationHelper.get_success_response(
+        "welcome_video_set", response_data, lang, status_code=200
+    )
 
-@bp.route('/welcome_video', methods=['GET'])
+
+@bp.route("/welcome_video", methods=["GET"])
 def get_welcome_video():
     lang = ValidationHelper.get_language_from_request()
     welcome_video = WelcomeVideo.query.first()
 
     if not welcome_video:
-        return LocalizationHelper.get_error_response('welcome_video_not_found', lang, 404)
+        return LocalizationHelper.get_error_response(
+            "welcome_video_not_found", lang, 404
+        )
 
-    response_data = {'video_url': welcome_video.video_url}
-    return LocalizationHelper.get_success_response('operation_successful', response_data, lang, status_code=200)
+    response_data = {"video_url": welcome_video.video_url}
+    return LocalizationHelper.get_success_response(
+        "operation_successful", response_data, lang, status_code=200
+    )
+
 
 # Authentication Routes
-@bp.route('/register', methods=['POST'])
+@bp.route("/register", methods=["POST"])
 def register():
     data = request.get_json()
     lang = ValidationHelper.get_language_from_request()
 
-    if User.query.filter_by(email=data['email']).first():
-        return LocalizationHelper.get_error_response('user_already_exists', lang, 400)
+    if User.query.filter_by(email=data["email"]).first():
+        return LocalizationHelper.get_error_response("user_already_exists", lang, 400)
 
-    hashed_password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
+    hashed_password = bcrypt.generate_password_hash(data["password"]).decode("utf-8")
 
     user = User(
-        name=data['name'],
-        email=data['email'],
+        name=data["name"],
+        email=data["email"],
         password=hashed_password,
-        phone=data.get('phone'),  # Added phone number - can be null
-        role=data.get('role', 'client'),
-        picture=data.get('picture', '')
+        phone=data.get("phone"),  # Added phone number - can be null
+        role=data.get("role", "client"),
+        picture=data.get("picture", ""),
     )
 
     db.session.add(user)
@@ -99,122 +163,143 @@ def register():
     token = create_user_token(user)
 
     response_data = {
-        'id': user.id,
-        'name': user.name,
-        'email': user.email,
-        'phone': user.phone,
-        'role': user.role,
-        'picture': user.picture,
-        'token': token
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "phone": user.phone,
+        "role": user.role,
+        "picture": user.picture,
+        "token": token,
     }
-    return LocalizationHelper.get_success_response('user_created_successfully', response_data, lang, status_code=201)
+    return LocalizationHelper.get_success_response(
+        "user_created_successfully", response_data, lang, status_code=201
+    )
 
-@bp.route('/login', methods=['POST'])
+
+@bp.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
     lang = ValidationHelper.get_language_from_request()
-    is_google_login = data.get('google', False)
+    is_google_login = data.get("google", False)
 
-    user = User.query.filter_by(email=data['email']).first()
+    user = User.query.filter_by(email=data["email"]).first()
     if not user:
-        return LocalizationHelper.get_error_response('user_not_found', lang, 404)
+        return LocalizationHelper.get_error_response("user_not_found", lang, 404)
 
     if not is_google_login:
-        if not bcrypt.check_password_hash(user.password, data['password']):
-            return LocalizationHelper.get_error_response('invalid_credentials', lang, 401)
+        if not bcrypt.check_password_hash(user.password, data["password"]):
+            return LocalizationHelper.get_error_response(
+                "invalid_credentials", lang, 401
+            )
     else:
         print("Google login: skipping password check")
 
     token = create_user_token(user)
 
     response_data = {
-        'id': user.id,
-        'name': user.name,
-        'email': user.email,
-        'phone': user.phone,
-        'role': user.role,
-        'picture': user.picture,
-        'token': token
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "phone": user.phone,
+        "role": user.role,
+        "picture": user.picture,
+        "token": token,
     }
-    return LocalizationHelper.get_success_response('operation_successful', response_data, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "operation_successful", response_data, lang, status_code=200
+    )
+
+
 # User Management Routes
-@bp.route('/users/<int:user_id>', methods=['GET'])
+@bp.route("/users/<int:user_id>", methods=["GET"])
 @client_required
 def get_user(user_id):
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
 
     user = User.query.get(current_user_id)
-    if user.role != 'admin' and current_user_id != user_id:
-        return LocalizationHelper.get_error_response('access_denied', lang, 403)
+    if user.role != "admin" and current_user_id != user_id:
+        return LocalizationHelper.get_error_response("access_denied", lang, 403)
 
     target_user = User.query.get_or_404(user_id)
 
     response_data = {
-        'id': target_user.id,
-        'name': target_user.name,
-        'email': target_user.email,
-        'phone': target_user.phone,
-        'role': target_user.role,
-        'picture': target_user.picture
+        "id": target_user.id,
+        "name": target_user.name,
+        "email": target_user.email,
+        "phone": target_user.phone,
+        "role": target_user.role,
+        "picture": target_user.picture,
     }
-    return LocalizationHelper.get_success_response('operation_successful', response_data, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "operation_successful", response_data, lang, status_code=200
+    )
+
 
 # Updated User PATCH Route (instead of PUT)
-@bp.route('/users/<int:user_id>', methods=['PATCH'])
+@bp.route("/users/<int:user_id>", methods=["PATCH"])
 @client_required
 def update_user(user_id):
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
 
     user = User.query.get(current_user_id)
-    if user.role != 'admin' and current_user_id != user_id:
-        return LocalizationHelper.get_error_response('access_denied', lang, 403)
+    if user.role != "admin" and current_user_id != user_id:
+        return LocalizationHelper.get_error_response("access_denied", lang, 403)
 
     target_user = User.query.get_or_404(user_id)
     data = request.get_json()
 
     # Update only provided fields
-    if 'name' in data:
-        target_user.name = data['name']
-    if 'phone' in data:
-        target_user.phone = data['phone']
-    if 'picture' in data:
-        target_user.picture = data['picture']
+    if "name" in data:
+        target_user.name = data["name"]
+    if "phone" in data:
+        target_user.phone = data["phone"]
+    if "picture" in data:
+        target_user.picture = data["picture"]
 
     # Only admin can update role
-    if user.role == 'admin' and 'role' in data:
-        target_user.role = data['role']
+    if user.role == "admin" and "role" in data:
+        target_user.role = data["role"]
 
     db.session.commit()
 
     response_data = {
-        'id': target_user.id,
-        'name': target_user.name,
-        'email': target_user.email,
-        'phone': target_user.phone,
-        'role': target_user.role,
-        'picture': target_user.picture
+        "id": target_user.id,
+        "name": target_user.name,
+        "email": target_user.email,
+        "phone": target_user.phone,
+        "role": target_user.role,
+        "picture": target_user.picture,
     }
-    return LocalizationHelper.get_success_response('user_updated_successfully', response_data, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "user_updated_successfully", response_data, lang, status_code=200
+    )
 
-@bp.route('/admin/users', methods=['GET'])
+
+@bp.route("/admin/users", methods=["GET"])
 @admin_required
 def get_all_users():
     lang = ValidationHelper.get_language_from_request()
     users = User.query.all()
-    result = [{
-        'id': user.id,
-        'name': user.name,
-        'email': user.email,
-        'phone': user.phone,
-        'role': user.role,
-        'picture': user.picture,
-        'level_count': len(user.levels)
-    } for user in users]
-    return LocalizationHelper.get_success_response('operation_successful', {'users': result}, lang, status_code=200)
+    result = [
+        {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "phone": user.phone,
+            "role": user.role,
+            "picture": user.picture,
+            "level_count": len(user.levels),
+        }
+        for user in users
+    ]
+    return LocalizationHelper.get_success_response(
+        "operation_successful", {"users": result}, lang, status_code=200
+    )
 
-@bp.route('/admin/users/<int:user_id>', methods=['DELETE'])
+
+@bp.route("/admin/users/<int:user_id>", methods=["DELETE"])
 @admin_required
 def delete_user(user_id):
     lang = ValidationHelper.get_language_from_request()
@@ -227,40 +312,52 @@ def delete_user(user_id):
     db.session.delete(user)
     db.session.commit()
 
-    return LocalizationHelper.get_success_response('user_deleted_successfully', None, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "user_deleted_successfully", None, lang, status_code=200
+    )
 
-@bp.route('/admin/users/<int:user_id>/reset_password', methods=['POST'])
+
+@bp.route("/admin/users/<int:user_id>/reset_password", methods=["POST"])
 @admin_required
 def reset_user_password(user_id):
     lang = ValidationHelper.get_language_from_request()
     user = User.query.get_or_404(user_id)
     data = request.get_json()
 
-    new_password = data.get('new_password')
+    new_password = data.get("new_password")
     if not new_password:
-        return LocalizationHelper.get_error_response('required_field', lang, 400, field='New password')
+        return LocalizationHelper.get_error_response(
+            "required_field", lang, 400, field="New password"
+        )
 
-    user.password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+    user.password = bcrypt.generate_password_hash(new_password).decode("utf-8")
     db.session.commit()
 
-    return LocalizationHelper.get_success_response('password_reset_successfully', None, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "password_reset_successfully", None, lang, status_code=200
+    )
 
-@bp.route('/admin/users/<int:user_id>/assign_level/<int:level_id>', methods=['POST'])
+
+@bp.route("/admin/users/<int:user_id>/assign_level/<int:level_id>", methods=["POST"])
 @admin_required
 def assign_level_to_user(user_id, level_id):
     lang = ValidationHelper.get_language_from_request()
     user = User.query.get_or_404(user_id)
     level = Level.query.get_or_404(level_id)
 
-    existing_user_level = UserLevel.query.filter_by(user_id=user_id, level_id=level_id).first()
+    existing_user_level = UserLevel.query.filter_by(
+        user_id=user_id, level_id=level_id
+    ).first()
     if existing_user_level:
-        return LocalizationHelper.get_error_response('level_already_assigned', lang, 400)
+        return LocalizationHelper.get_error_response(
+            "level_already_assigned", lang, 400
+        )
 
     user_level = UserLevel(
         user_id=user_id,
         level_id=level_id,
         is_completed=False,
-        can_take_final_exam=False
+        can_take_final_exam=False,
     )
 
     db.session.add(user_level)
@@ -277,46 +374,51 @@ def assign_level_to_user(user_id, level_id):
                 user_level_id=user_level.id,
                 video_id=video.id,
                 is_opened=(i == 0),
-                is_completed=False
+                is_completed=False,
             )
             db.session.add(video_progress)
 
     db.session.commit()
 
-    return LocalizationHelper.get_success_response('level_assigned_successfully', None, lang, status_code=201)
+    return LocalizationHelper.get_success_response(
+        "level_assigned_successfully", None, lang, status_code=201
+    )
+
 
 # Level Management Routes
-@bp.route('/levels', methods=['POST'])
+@bp.route("/levels", methods=["POST"])
 @admin_required
 def create_level():
     lang = ValidationHelper.get_language_from_request()
     data = request.form
 
-    if 'file' not in request.files:
-        return LocalizationHelper.get_error_response('file_required', lang, 400)
+    if "file" not in request.files:
+        return LocalizationHelper.get_error_response("file_required", lang, 400)
 
-    file = request.files['file']
-    if file.filename == '':
-        return LocalizationHelper.get_error_response('no_file_selected', lang, 400)
+    file = request.files["file"]
+    if file.filename == "":
+        return LocalizationHelper.get_error_response("no_file_selected", lang, 400)
 
-    level_number = data.get('level_number')
+    level_number = data.get("level_number")
     if not level_number or not level_number.isdigit():
-        return LocalizationHelper.get_error_response('invalid_number', lang, 400, field='Level number')
+        return LocalizationHelper.get_error_response(
+            "invalid_number", lang, 400, field="Level number"
+        )
 
     level = Level(
-        name=data['name'],
-        description=data.get('description', ''),
+        name=data["name"],
+        description=data.get("description", ""),
         level_number=int(level_number),
-        welcome_video_url=data.get('welcome_video_url', ''),
-        price=float(data['price']),
-        initial_exam_question=data.get('initial_exam_question', ''),
-        final_exam_question=data.get('final_exam_question', '')
+        welcome_video_url=data.get("welcome_video_url", ""),
+        price=float(data["price"]),
+        initial_exam_question=data.get("initial_exam_question", ""),
+        final_exam_question=data.get("final_exam_question", ""),
     )
 
     if file:
         filename = secure_filename(file.filename)
         unique_filename = f"{uuid.uuid4()}_{filename}"
-        upload_path = os.path.join(current_app.config['UPLOAD_FOLDER'], unique_filename)
+        upload_path = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_filename)
         os.makedirs(os.path.dirname(upload_path), exist_ok=True)
         file.save(upload_path)
         level.image_path = f"/Uploads/levels/{unique_filename}"
@@ -325,40 +427,47 @@ def create_level():
     db.session.commit()
 
     response_data = {
-        'id': level.id,
-        'name': level.name,
-        'description': level.description,
-        'level_number': level.level_number,
-        'welcome_video_url': level.welcome_video_url,
-        'image_path': level.image_path,
-        'price': level.price,
-        'initial_exam_question': level.initial_exam_question,
-        'final_exam_question': level.final_exam_question,
-        'videos_count': 0,
-        'videos': []
+        "id": level.id,
+        "name": level.name,
+        "description": level.description,
+        "level_number": level.level_number,
+        "welcome_video_url": level.welcome_video_url,
+        "image_path": level.image_path,
+        "price": level.price,
+        "initial_exam_question": level.initial_exam_question,
+        "final_exam_question": level.final_exam_question,
+        "videos_count": 0,
+        "videos": [],
     }
-    return LocalizationHelper.get_success_response('level_created_successfully', response_data, lang, status_code=201)
+    return LocalizationHelper.get_success_response(
+        "level_created_successfully", response_data, lang, status_code=201
+    )
 
-@bp.route('/levels/<int:level_id>', methods=['PUT'])
+
+@bp.route("/levels/<int:level_id>", methods=["PUT"])
 @admin_required
 def update_level(level_id):
     lang = ValidationHelper.get_language_from_request()
     level = Level.query.get_or_404(level_id)
     data = request.form
 
-    level.name = data.get('name', level.name)
-    level.description = data.get('description', level.description)
-    level.level_number = int(data.get('level_number', level.level_number))
-    level.welcome_video_url = data.get('welcome_video_url', level.welcome_video_url)
-    level.price = float(data.get('price', level.price))
-    level.initial_exam_question = data.get('initial_exam_question', level.initial_exam_question)
-    level.final_exam_question = data.get('final_exam_question', level.final_exam_question)
+    level.name = data.get("name", level.name)
+    level.description = data.get("description", level.description)
+    level.level_number = int(data.get("level_number", level.level_number))
+    level.welcome_video_url = data.get("welcome_video_url", level.welcome_video_url)
+    level.price = float(data.get("price", level.price))
+    level.initial_exam_question = data.get(
+        "initial_exam_question", level.initial_exam_question
+    )
+    level.final_exam_question = data.get(
+        "final_exam_question", level.final_exam_question
+    )
 
-    if 'file' in request.files and request.files['file'].filename:
-        file = request.files['file']
+    if "file" in request.files and request.files["file"].filename:
+        file = request.files["file"]
         filename = secure_filename(file.filename)
         unique_filename = f"{uuid.uuid4()}_{filename}"
-        upload_path = os.path.join(current_app.config['UPLOAD_FOLDER'], unique_filename)
+        upload_path = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_filename)
         os.makedirs(os.path.dirname(upload_path), exist_ok=True)
         file.save(upload_path)
         level.image_path = f"/Uploads/levels/{unique_filename}"
@@ -366,34 +475,38 @@ def update_level(level_id):
     db.session.commit()
 
     response_data = {
-        'id': level.id,
-        'name': level.name,
-        'description': level.description,
-        'level_number': level.level_number,
-        'welcome_video_url': level.welcome_video_url,
-        'image_path': level.image_path,
-        'price': level.price,
-        'initial_exam_question': level.initial_exam_question,
-        'final_exam_question': level.final_exam_question,
-        'videos_count': len(level.videos),
-        'videos': [self._format_video_data(v) for v in level.videos]
+        "id": level.id,
+        "name": level.name,
+        "description": level.description,
+        "level_number": level.level_number,
+        "welcome_video_url": level.welcome_video_url,
+        "image_path": level.image_path,
+        "price": level.price,
+        "initial_exam_question": level.initial_exam_question,
+        "final_exam_question": level.final_exam_question,
+        "videos_count": len(level.videos),
+        "videos": [self._format_video_data(v) for v in level.videos],
     }
-    return LocalizationHelper.get_success_response('level_updated_successfully', response_data, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "level_updated_successfully", response_data, lang, status_code=200
+    )
+
 
 def _format_video_data(video):
     """Helper function to format video data with questions"""
-    questions = Question.query.filter_by(video_id=video.id).order_by(Question.order).all()
+    questions = (
+        Question.query.filter_by(video_id=video.id).order_by(Question.order).all()
+    )
     return {
-        'id': video.id,
-        'youtube_link': video.youtube_link,
-        'questions': [{
-            'id': q.id,
-            'text': q.text,
-            'order': q.order
-        } for q in questions]
+        "id": video.id,
+        "youtube_link": video.youtube_link,
+        "questions": [
+            {"id": q.id, "text": q.text, "order": q.order} for q in questions
+        ],
     }
 
-@bp.route('/levels/<int:level_id>', methods=['DELETE'])
+
+@bp.route("/levels/<int:level_id>", methods=["DELETE"])
 @admin_required
 def delete_level(level_id):
     lang = ValidationHelper.get_language_from_request()
@@ -408,19 +521,22 @@ def delete_level(level_id):
     db.session.delete(level)
     db.session.commit()
 
-    return LocalizationHelper.get_success_response('level_deleted_successfully', None, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "level_deleted_successfully", None, lang, status_code=200
+    )
 
-@bp.route('/levels', methods=['GET'])
+
+@bp.route("/levels", methods=["GET"])
 @admin_or_client_required
 def get_levels():
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
     user = User.query.get(current_user_id)
 
-    min_price = request.args.get('min_price', type=float)
-    max_price = request.args.get('max_price', type=float)
-    level_number = request.args.get('level_number', type=int)
-    name = request.args.get('name')
+    min_price = request.args.get("min_price", type=float)
+    max_price = request.args.get("max_price", type=float)
+    level_number = request.args.get("level_number", type=int)
+    name = request.args.get("name")
 
     query = Level.query
 
@@ -431,87 +547,107 @@ def get_levels():
     if level_number is not None:
         query = query.filter(Level.level_number == level_number)
     if name:
-        query = query.filter(Level.name.ilike(f'%{name}%'))
+        query = query.filter(Level.name.ilike(f"%{name}%"))
 
     levels = query.order_by(Level.level_number).all()
     result = []
 
     for level in levels:
         level_data = {
-            'id': level.id,
-            'name': level.name,
-            'description': level.description,
-            'level_number': level.level_number,
-            'welcome_video_url': level.welcome_video_url,
-            'image_path': level.image_path,
-            'price': level.price,
-            'initial_exam_question': level.initial_exam_question,
-            'final_exam_question': level.final_exam_question,
-            'videos_count': len(level.videos),
-            'videos': [],
-            'is_completed': False,
-            'can_take_final_exam': False
+            "id": level.id,
+            "name": level.name,
+            "description": level.description,
+            "level_number": level.level_number,
+            "welcome_video_url": level.welcome_video_url,
+            "image_path": level.image_path,
+            "price": level.price,
+            "initial_exam_question": level.initial_exam_question,
+            "final_exam_question": level.final_exam_question,
+            "videos_count": len(level.videos),
+            "videos": [],
+            "is_completed": False,
+            "can_take_final_exam": False,
         }
 
-        user_level = UserLevel.query.filter_by(user_id=current_user_id, level_id=level.id).first()
+        user_level = UserLevel.query.filter_by(
+            user_id=current_user_id, level_id=level.id
+        ).first()
         if user_level:
-            level_data['is_completed'] = user_level.is_completed
-            level_data['can_take_final_exam'] = user_level.can_take_final_exam
+            level_data["is_completed"] = user_level.is_completed
+            level_data["can_take_final_exam"] = user_level.can_take_final_exam
 
             for video in level.videos:
                 video_progress = UserVideoProgress.query.filter_by(
-                    user_level_id=user_level.id,
-                    video_id=video.id
+                    user_level_id=user_level.id, video_id=video.id
                 ).first()
 
-                questions = Question.query.filter_by(video_id=video.id).order_by(Question.order).all()
+                questions = (
+                    Question.query.filter_by(video_id=video.id)
+                    .order_by(Question.order)
+                    .all()
+                )
                 questions_data = []
-                
-                if user.role == 'admin' or (video_progress and video_progress.is_opened):
+
+                if user.role == "admin" or (
+                    video_progress and video_progress.is_opened
+                ):
                     for question in questions:
                         question_data = {
-                            'id': question.id,
-                            'text': question.text,
-                            'order': question.order
+                            "id": question.id,
+                            "text": question.text,
+                            "order": question.order,
                         }
-                        if user.role == 'client':
+                        if user.role == "client":
                             user_answer = UserQuestionAnswer.query.filter_by(
                                 user_id=current_user_id, question_id=question.id
                             ).first()
                             if user_answer:
-                                question_data['user_answer'] = {
-                                    'correct_words': user_answer.correct_words,
-                                    'wrong_words': user_answer.wrong_words,
-                                    'percentage': user_answer.percentage,
-                                    'submitted_at': user_answer.submitted_at.isoformat()
+                                question_data["user_answer"] = {
+                                    "correct_words": user_answer.correct_words,
+                                    "wrong_words": user_answer.wrong_words,
+                                    "percentage": user_answer.percentage,
+                                    "submitted_at": user_answer.submitted_at.isoformat(),
                                 }
                         questions_data.append(question_data)
 
                 video_data = {
-                    'id': video.id,
-                    'youtube_link': video.youtube_link if user.role == 'admin' else (video.youtube_link if video_progress and video_progress.is_opened else ''),
-                    'questions': questions_data,
-                    'is_opened': video_progress.is_opened if video_progress else False
+                    "id": video.id,
+                    "youtube_link": (
+                        video.youtube_link
+                        if user.role == "admin"
+                        else (
+                            video.youtube_link
+                            if video_progress and video_progress.is_opened
+                            else ""
+                        )
+                    ),
+                    "questions": questions_data,
+                    "is_opened": video_progress.is_opened if video_progress else False,
                 }
-                level_data['videos'].append(video_data)
+                level_data["videos"].append(video_data)
         else:
-            level_data['videos'] = [{'id': v.id, 'youtube_link': '', 'questions': []} for v in level.videos]
+            level_data["videos"] = [
+                {"id": v.id, "youtube_link": "", "questions": []} for v in level.videos
+            ]
 
-        if user.role == 'admin':
-            level_data['user_count'] = len(level.user_levels)
+        if user.role == "admin":
+            level_data["user_count"] = len(level.user_levels)
 
         result.append(level_data)
 
-    return LocalizationHelper.get_success_response('operation_successful', {'levels': result}, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "operation_successful", {"levels": result}, lang, status_code=200
+    )
 
-@bp.route('/admin/levels', methods=['GET'])
+
+@bp.route("/admin/levels", methods=["GET"])
 @admin_required
 def admin_get_all_levels():
     lang = ValidationHelper.get_language_from_request()
-    min_price = request.args.get('min_price', type=float)
-    max_price = request.args.get('max_price', type=float)
-    level_number = request.args.get('level_number', type=int)
-    name = request.args.get('name')
+    min_price = request.args.get("min_price", type=float)
+    max_price = request.args.get("max_price", type=float)
+    level_number = request.args.get("level_number", type=int)
+    name = request.args.get("name")
 
     query = Level.query
 
@@ -522,26 +658,32 @@ def admin_get_all_levels():
     if level_number is not None:
         query = query.filter(Level.level_number == level_number)
     if name:
-        query = query.filter(Level.name.ilike(f'%{name}%'))
+        query = query.filter(Level.name.ilike(f"%{name}%"))
 
     levels = query.order_by(Level.level_number).all()
-    result = [{
-        'id': level.id,
-        'name': level.name,
-        'description': level.description,
-        'level_number': level.level_number,
-        'welcome_video_url': level.welcome_video_url,
-        'image_path': level.image_path,
-        'price': level.price,
-        'initial_exam_question': level.initial_exam_question,
-        'final_exam_question': level.final_exam_question,
-        'videos_count': len(level.videos),
-        'videos': [_format_video_data(v) for v in level.videos],
-        'user_count': len(level.user_levels)
-    } for level in levels]
-    return LocalizationHelper.get_success_response('operation_successful', {'levels': result}, lang, status_code=200)
+    result = [
+        {
+            "id": level.id,
+            "name": level.name,
+            "description": level.description,
+            "level_number": level.level_number,
+            "welcome_video_url": level.welcome_video_url,
+            "image_path": level.image_path,
+            "price": level.price,
+            "initial_exam_question": level.initial_exam_question,
+            "final_exam_question": level.final_exam_question,
+            "videos_count": len(level.videos),
+            "videos": [_format_video_data(v) for v in level.videos],
+            "user_count": len(level.user_levels),
+        }
+        for level in levels
+    ]
+    return LocalizationHelper.get_success_response(
+        "operation_successful", {"levels": result}, lang, status_code=200
+    )
 
-@bp.route('/levels/<int:level_id>', methods=['GET'])
+
+@bp.route("/levels/<int:level_id>", methods=["GET"])
 @client_required
 def get_level(level_id):
     current_user_id = int(get_jwt_identity())
@@ -549,106 +691,121 @@ def get_level(level_id):
     level = Level.query.get_or_404(level_id)
 
     level_data = {
-        'id': level.id,
-        'name': level.name,
-        'description': level.description,
-        'level_number': level.level_number,
-        'welcome_video_url': level.welcome_video_url,
-        'image_path': level.image_path,
-        'price': level.price,
-        'initial_exam_question': level.initial_exam_question,
-        'final_exam_question': level.final_exam_question,
-        'videos_count': len(level.videos),
-        'videos': [],
-        'is_completed': False,
-        'can_take_final_exam': False
+        "id": level.id,
+        "name": level.name,
+        "description": level.description,
+        "level_number": level.level_number,
+        "welcome_video_url": level.welcome_video_url,
+        "image_path": level.image_path,
+        "price": level.price,
+        "initial_exam_question": level.initial_exam_question,
+        "final_exam_question": level.final_exam_question,
+        "videos_count": len(level.videos),
+        "videos": [],
+        "is_completed": False,
+        "can_take_final_exam": False,
     }
 
-    user_level = UserLevel.query.filter_by(user_id=current_user_id, level_id=level.id).first()
+    user_level = UserLevel.query.filter_by(
+        user_id=current_user_id, level_id=level.id
+    ).first()
     if user_level:
-        level_data['is_completed'] = user_level.is_completed
-        level_data['can_take_final_exam'] = user_level.can_take_final_exam
+        level_data["is_completed"] = user_level.is_completed
+        level_data["can_take_final_exam"] = user_level.can_take_final_exam
 
         for video in level.videos:
             video_progress = UserVideoProgress.query.filter_by(
-                user_level_id=user_level.id,
-                video_id=video.id
+                user_level_id=user_level.id, video_id=video.id
             ).first()
 
-            questions = Question.query.filter_by(video_id=video.id).order_by(Question.order).all()
+            questions = (
+                Question.query.filter_by(video_id=video.id)
+                .order_by(Question.order)
+                .all()
+            )
             questions_data = []
-            
+
             for question in questions:
                 question_data = {
-                    'id': question.id,
-                    'text': question.text,
-                    'order': question.order
+                    "id": question.id,
+                    "text": question.text,
+                    "order": question.order,
                 }
                 user_answer = UserQuestionAnswer.query.filter_by(
                     user_id=current_user_id, question_id=question.id
                 ).first()
                 if user_answer:
-                    question_data['user_answer'] = {
-                        'correct_words': user_answer.correct_words,
-                        'wrong_words': user_answer.wrong_words,
-                        'percentage': user_answer.percentage,
-                        'submitted_at': user_answer.submitted_at.isoformat()
+                    question_data["user_answer"] = {
+                        "correct_words": user_answer.correct_words,
+                        "wrong_words": user_answer.wrong_words,
+                        "percentage": user_answer.percentage,
+                        "submitted_at": user_answer.submitted_at.isoformat(),
                     }
                 questions_data.append(question_data)
 
             video_data = {
-                'id': video.id,
-                'youtube_link': video.youtube_link,
-                'questions': questions_data,
-                'is_opened': video_progress.is_opened if video_progress else False
+                "id": video.id,
+                "youtube_link": video.youtube_link,
+                "questions": questions_data,
+                "is_opened": video_progress.is_opened if video_progress else False,
             }
-            level_data['videos'].append(video_data)
+            level_data["videos"].append(video_data)
     else:
-        level_data['videos'] = [{'id': v.id, 'youtube_link': '', 'questions': []} for v in level.videos]
+        level_data["videos"] = [
+            {"id": v.id, "youtube_link": "", "questions": []} for v in level.videos
+        ]
 
-    return LocalizationHelper.get_success_response('operation_successful', level_data, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "operation_successful", level_data, lang, status_code=200
+    )
+
 
 # Video Management Routes
-@bp.route('/levels/<int:level_id>/videos', methods=['POST'])
+@bp.route("/levels/<int:level_id>/videos", methods=["POST"])
 @admin_required
 def add_video_to_level(level_id):
     lang = ValidationHelper.get_language_from_request()
     level = Level.query.get_or_404(level_id)
     data = request.get_json()
 
-    video = Video(
-        level_id=level_id,
-        youtube_link=data['youtube_link']
-    )
+    video = Video(level_id=level_id, youtube_link=data["youtube_link"])
 
     db.session.add(video)
     db.session.commit()
 
     response_data = {
-        'id': video.id,
-        'youtube_link': video.youtube_link,
-        'questions': []
+        "id": video.id,
+        "youtube_link": video.youtube_link,
+        "questions": [],
     }
-    return LocalizationHelper.get_success_response('video_created_successfully', response_data, lang, status_code=201)
+    return LocalizationHelper.get_success_response(
+        "video_created_successfully", response_data, lang, status_code=201
+    )
 
-@bp.route('/videos/<int:video_id>', methods=['PUT'])
+
+@bp.route("/videos/<int:video_id>", methods=["PUT"])
 @admin_required
 def update_video(video_id):
     lang = ValidationHelper.get_language_from_request()
     video = Video.query.get_or_404(video_id)
     data = request.get_json()
 
-    video.youtube_link = data.get('youtube_link', video.youtube_link)
+    video.youtube_link = data.get("youtube_link", video.youtube_link)
     db.session.commit()
 
     response_data = {
-        'id': video.id,
-        'youtube_link': video.youtube_link,
-        'questions': [{'id': q.id, 'text': q.text, 'order': q.order} for q in video.questions]
+        "id": video.id,
+        "youtube_link": video.youtube_link,
+        "questions": [
+            {"id": q.id, "text": q.text, "order": q.order} for q in video.questions
+        ],
     }
-    return LocalizationHelper.get_success_response('video_updated_successfully', response_data, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "video_updated_successfully", response_data, lang, status_code=200
+    )
 
-@bp.route('/videos/<int:video_id>', methods=['DELETE'])
+
+@bp.route("/videos/<int:video_id>", methods=["DELETE"])
 @admin_required
 def delete_video(video_id):
     lang = ValidationHelper.get_language_from_request()
@@ -661,139 +818,189 @@ def delete_video(video_id):
     db.session.delete(video)
     db.session.commit()
 
-    return LocalizationHelper.get_success_response('video_deleted_successfully', None, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "video_deleted_successfully", None, lang, status_code=200
+    )
 
-@bp.route('/admin/videos', methods=['GET'])
+
+@bp.route("/admin/videos", methods=["GET"])
 @admin_required
 def get_all_videos():
     lang = ValidationHelper.get_language_from_request()
     videos = Video.query.all()
-    result = [{
-        'id': video.id,
-        'level_id': video.level_id,
-        'level_name': video.level.name if video.level else '',
-        'youtube_link': video.youtube_link,
-        'questions': [{'id': q.id, 'text': q.text, 'order': q.order} for q in video.questions],
-        'user_progress_count': UserVideoProgress.query.filter_by(video_id=video.id).count()
-    } for video in videos]
-    return LocalizationHelper.get_success_response('operation_successful', {'videos': result}, lang, status_code=200)
+    result = [
+        {
+            "id": video.id,
+            "level_id": video.level_id,
+            "level_name": video.level.name if video.level else "",
+            "youtube_link": video.youtube_link,
+            "questions": [
+                {"id": q.id, "text": q.text, "order": q.order} for q in video.questions
+            ],
+            "user_progress_count": UserVideoProgress.query.filter_by(
+                video_id=video.id
+            ).count(),
+        }
+        for video in videos
+    ]
+    return LocalizationHelper.get_success_response(
+        "operation_successful", {"videos": result}, lang, status_code=200
+    )
+
 
 # Question Management Routes (CRUD)
-@bp.route('/videos/<int:video_id>/questions', methods=['POST'])
+@bp.route("/videos/<int:video_id>/questions", methods=["POST"])
 @admin_required
 def create_question(video_id):
     lang = ValidationHelper.get_language_from_request()
     video = Video.query.get_or_404(video_id)
     data = request.get_json()
 
-    max_order = db.session.query(db.func.max(Question.order)).filter_by(video_id=video_id).scalar() or 0
-    
+    max_order = (
+        db.session.query(db.func.max(Question.order))
+        .filter_by(video_id=video_id)
+        .scalar()
+        or 0
+    )
+
     question = Question(
-        video_id=video_id,
-        text=data['text'],
-        order=data.get('order', max_order + 1)
+        video_id=video_id, text=data["text"], order=data.get("order", max_order + 1)
     )
 
     db.session.add(question)
     db.session.commit()
 
     response_data = {
-        'id': question.id,
-        'video_id': question.video_id,
-        'text': question.text,
-        'order': question.order,
-        'created_at': question.created_at.isoformat()
+        "id": question.id,
+        "video_id": question.video_id,
+        "text": question.text,
+        "order": question.order,
+        "created_at": question.created_at.isoformat(),
     }
-    return LocalizationHelper.get_success_response('question_created_successfully', response_data, lang, status_code=201)
+    return LocalizationHelper.get_success_response(
+        "question_created_successfully", response_data, lang, status_code=201
+    )
 
-@bp.route('/questions/<int:question_id>', methods=['PUT'])
+
+@bp.route("/questions/<int:question_id>", methods=["PUT"])
 @admin_required
 def update_question(question_id):
     lang = ValidationHelper.get_language_from_request()
     question = Question.query.get_or_404(question_id)
     data = request.get_json()
 
-    question.text = data.get('text', question.text)
-    question.order = data.get('order', question.order)
+    question.text = data.get("text", question.text)
+    question.order = data.get("order", question.order)
     db.session.commit()
 
     response_data = {
-        'id': question.id,
-        'video_id': question.video_id,
-        'text': question.text,
-        'order': question.order,
-        'created_at': question.created_at.isoformat()
+        "id": question.id,
+        "video_id": question.video_id,
+        "text": question.text,
+        "order": question.order,
+        "created_at": question.created_at.isoformat(),
     }
-    return LocalizationHelper.get_success_response('question_updated_successfully', response_data, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "question_updated_successfully", response_data, lang, status_code=200
+    )
 
-@bp.route('/questions/<int:question_id>', methods=['DELETE'])
+
+@bp.route("/questions/<int:question_id>", methods=["DELETE"])
 @admin_required
 def delete_question(question_id):
     lang = ValidationHelper.get_language_from_request()
     question = Question.query.get_or_404(question_id)
-    
+
     UserQuestionAnswer.query.filter_by(question_id=question_id).delete()
-    
+
     db.session.delete(question)
     db.session.commit()
 
-    return LocalizationHelper.get_success_response('question_deleted_successfully', None, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "question_deleted_successfully", None, lang, status_code=200
+    )
 
-@bp.route('/admin/questions', methods=['GET'])
+
+@bp.route("/admin/questions", methods=["GET"])
 @admin_required
 def get_all_questions():
     lang = ValidationHelper.get_language_from_request()
     questions = Question.query.order_by(Question.video_id, Question.order).all()
-    result = [{
-        'id': question.id,
-        'video_id': question.video_id,
-        'video_link': question.video.youtube_link if question.video else '',
-        'level_name': question.video.level.name if question.video and question.video.level else '',
-        'text': question.text,
-        'order': question.order,
-        'created_at': question.created_at.isoformat(),
-        'answers_count': UserQuestionAnswer.query.filter_by(question_id=question.id).count()
-    } for question in questions]
-    return LocalizationHelper.get_success_response('operation_successful', {'questions': result}, lang, status_code=200)
+    result = [
+        {
+            "id": question.id,
+            "video_id": question.video_id,
+            "video_link": question.video.youtube_link if question.video else "",
+            "level_name": (
+                question.video.level.name
+                if question.video and question.video.level
+                else ""
+            ),
+            "text": question.text,
+            "order": question.order,
+            "created_at": question.created_at.isoformat(),
+            "answers_count": UserQuestionAnswer.query.filter_by(
+                question_id=question.id
+            ).count(),
+        }
+        for question in questions
+    ]
+    return LocalizationHelper.get_success_response(
+        "operation_successful", {"questions": result}, lang, status_code=200
+    )
 
-@bp.route('/videos/<int:video_id>/questions', methods=['GET'])
+
+@bp.route("/videos/<int:video_id>/questions", methods=["GET"])
 @admin_or_client_required
 def get_video_questions(video_id):
     lang = ValidationHelper.get_language_from_request()
     video = Video.query.get_or_404(video_id)
     current_user_id = int(get_jwt_identity())
     user = User.query.get(current_user_id)
-    
-    questions = Question.query.filter_by(video_id=video_id).order_by(Question.order).all()
+
+    questions = (
+        Question.query.filter_by(video_id=video_id).order_by(Question.order).all()
+    )
     result = []
-    
+
     for question in questions:
         question_data = {
-            'id': question.id,
-            'video_id': question.video_id,
-            'text': question.text,
-            'order': question.order,
-            'created_at': question.created_at.isoformat()
+            "id": question.id,
+            "video_id": question.video_id,
+            "text": question.text,
+            "order": question.order,
+            "created_at": question.created_at.isoformat(),
         }
-        if user.role == 'client':
+        if user.role == "client":
             user_answer = UserQuestionAnswer.query.filter_by(
                 user_id=current_user_id, question_id=question.id
             ).first()
             if user_answer:
-                question_data['user_answer'] = {
-                    'correct_words': user_answer.correct_words,
-                    'wrong_words': user_answer.wrong_words,
-                    'percentage': user_answer.percentage,
-                    'correct_words_list': json.loads(user_answer.correct_words_list) if user_answer.correct_words_list else [],
-                    'wrong_words_list': json.loads(user_answer.wrong_words_list) if user_answer.wrong_words_list else [],
-                    'submitted_at': user_answer.submitted_at.isoformat()
+                question_data["user_answer"] = {
+                    "correct_words": user_answer.correct_words,
+                    "wrong_words": user_answer.wrong_words,
+                    "percentage": user_answer.percentage,
+                    "correct_words_list": (
+                        json.loads(user_answer.correct_words_list)
+                        if user_answer.correct_words_list
+                        else []
+                    ),
+                    "wrong_words_list": (
+                        json.loads(user_answer.wrong_words_list)
+                        if user_answer.wrong_words_list
+                        else []
+                    ),
+                    "submitted_at": user_answer.submitted_at.isoformat(),
                 }
         result.append(question_data)
-    
-    return LocalizationHelper.get_success_response('operation_successful', {'questions': result}, lang, status_code=200)
+
+    return LocalizationHelper.get_success_response(
+        "operation_successful", {"questions": result}, lang, status_code=200
+    )
+
 
 # Question Answer Submission Routes
-@bp.route('/questions/<int:question_id>/submit', methods=['POST'])
+@bp.route("/questions/<int:question_id>/submit", methods=["POST"])
 @client_required
 def submit_question_answer(question_id):
     current_user_id = int(get_jwt_identity())
@@ -801,29 +1008,32 @@ def submit_question_answer(question_id):
     question = Question.query.get_or_404(question_id)
     data = request.get_json()
 
-    if 'correct_words' not in data or 'wrong_words' not in data:
-        return LocalizationHelper.get_error_response('required_field', lang, 400, field='correct_words and wrong_words')
+    if "correct_words" not in data or "wrong_words" not in data:
+        return LocalizationHelper.get_error_response(
+            "required_field", lang, 400, field="correct_words and wrong_words"
+        )
 
-    correct_words = data['correct_words']
-    wrong_words = data['wrong_words']
+    correct_words = data["correct_words"]
+    wrong_words = data["wrong_words"]
     total_words = correct_words + wrong_words
     percentage = (correct_words / total_words * 100) if total_words > 0 else 0
 
-    user_level = UserLevel.query.join(Level).join(Video).filter(
-        UserLevel.user_id == current_user_id,
-        Video.id == question.video_id
-    ).first()
-    
+    user_level = (
+        UserLevel.query.join(Level)
+        .join(Video)
+        .filter(UserLevel.user_id == current_user_id, Video.id == question.video_id)
+        .first()
+    )
+
     if not user_level:
-        return LocalizationHelper.get_error_response('level_not_purchased', lang, 403)
+        return LocalizationHelper.get_error_response("level_not_purchased", lang, 403)
 
     video_progress = UserVideoProgress.query.filter_by(
-        user_level_id=user_level.id,
-        video_id=question.video_id
+        user_level_id=user_level.id, video_id=question.video_id
     ).first()
-    
+
     if not video_progress or not video_progress.is_opened:
-        return LocalizationHelper.get_error_response('video_must_be_opened', lang, 400)
+        return LocalizationHelper.get_error_response("video_must_be_opened", lang, 400)
 
     existing_answer = UserQuestionAnswer.query.filter_by(
         user_id=current_user_id, question_id=question_id
@@ -833,8 +1043,10 @@ def submit_question_answer(question_id):
         existing_answer.correct_words = correct_words
         existing_answer.wrong_words = wrong_words
         existing_answer.percentage = percentage
-        existing_answer.correct_words_list = json.dumps(data.get('correct_words_list', []))
-        existing_answer.wrong_words_list = json.dumps(data.get('wrong_words_list', []))
+        existing_answer.correct_words_list = json.dumps(
+            data.get("correct_words_list", [])
+        )
+        existing_answer.wrong_words_list = json.dumps(data.get("wrong_words_list", []))
         existing_answer.submitted_at = datetime.utcnow()
         answer = existing_answer
     else:
@@ -844,103 +1056,133 @@ def submit_question_answer(question_id):
             correct_words=correct_words,
             wrong_words=wrong_words,
             percentage=percentage,
-            correct_words_list=json.dumps(data.get('correct_words_list', [])),
-            wrong_words_list=json.dumps(data.get('wrong_words_list', []))
+            correct_words_list=json.dumps(data.get("correct_words_list", [])),
+            wrong_words_list=json.dumps(data.get("wrong_words_list", [])),
         )
         db.session.add(answer)
 
     db.session.commit()
 
     response_data = {
-        'id': answer.id,
-        'question_id': question_id,
-        'question_text': question.text,
-        'correct_words': answer.correct_words,
-        'wrong_words': answer.wrong_words,
-        'percentage': answer.percentage,
-        'correct_words_list': json.loads(answer.correct_words_list) if answer.correct_words_list else [],
-        'wrong_words_list': json.loads(answer.wrong_words_list) if answer.wrong_words_list else [],
-        'submitted_at': answer.submitted_at.isoformat()
+        "id": answer.id,
+        "question_id": question_id,
+        "question_text": question.text,
+        "correct_words": answer.correct_words,
+        "wrong_words": answer.wrong_words,
+        "percentage": answer.percentage,
+        "correct_words_list": (
+            json.loads(answer.correct_words_list) if answer.correct_words_list else []
+        ),
+        "wrong_words_list": (
+            json.loads(answer.wrong_words_list) if answer.wrong_words_list else []
+        ),
+        "submitted_at": answer.submitted_at.isoformat(),
     }
-    return LocalizationHelper.get_success_response('answer_submitted_successfully', response_data, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "answer_submitted_successfully", response_data, lang, status_code=200
+    )
 
-@bp.route('/users/<int:user_id>/questions/<int:question_id>/answer', methods=['GET'])
+
+@bp.route("/users/<int:user_id>/questions/<int:question_id>/answer", methods=["GET"])
 @client_required
 def get_user_question_answer(user_id, question_id):
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
     user = User.query.get(current_user_id)
-    
-    if user.role != 'admin' and current_user_id != user_id:
-        return LocalizationHelper.get_error_response('access_denied', lang, 403)
 
-    answer = UserQuestionAnswer.query.filter_by(user_id=user_id, question_id=question_id).first()
-    
+    if user.role != "admin" and current_user_id != user_id:
+        return LocalizationHelper.get_error_response("access_denied", lang, 403)
+
+    answer = UserQuestionAnswer.query.filter_by(
+        user_id=user_id, question_id=question_id
+    ).first()
+
     if not answer:
-        return LocalizationHelper.get_error_response('answer_not_found', lang, 404)
+        return LocalizationHelper.get_error_response("answer_not_found", lang, 404)
 
     question = Question.query.get(question_id)
-    
-    response_data = {
-        'id': answer.id,
-        'question_id': question_id,
-        'question_text': question.text if question else '',
-        'correct_words': answer.correct_words,
-        'wrong_words': answer.wrong_words,
-        'percentage': answer.percentage,
-        'correct_words_list': json.loads(answer.correct_words_list) if answer.correct_words_list else [],
-        'wrong_words_list': json.loads(answer.wrong_words_list) if answer.wrong_words_list else [],
-        'submitted_at': answer.submitted_at.isoformat()
-    }
-    return LocalizationHelper.get_success_response('operation_successful', response_data, lang, status_code=200)
 
-@bp.route('/admin/questions/<int:question_id>/answers', methods=['GET'])
+    response_data = {
+        "id": answer.id,
+        "question_id": question_id,
+        "question_text": question.text if question else "",
+        "correct_words": answer.correct_words,
+        "wrong_words": answer.wrong_words,
+        "percentage": answer.percentage,
+        "correct_words_list": (
+            json.loads(answer.correct_words_list) if answer.correct_words_list else []
+        ),
+        "wrong_words_list": (
+            json.loads(answer.wrong_words_list) if answer.wrong_words_list else []
+        ),
+        "submitted_at": answer.submitted_at.isoformat(),
+    }
+    return LocalizationHelper.get_success_response(
+        "operation_successful", response_data, lang, status_code=200
+    )
+
+
+@bp.route("/admin/questions/<int:question_id>/answers", methods=["GET"])
 @admin_required
 def get_question_answers(question_id):
     lang = ValidationHelper.get_language_from_request()
     question = Question.query.get_or_404(question_id)
     answers = UserQuestionAnswer.query.filter_by(question_id=question_id).all()
-    
-    result = [{
-        'id': answer.id,
-        'user_id': answer.user_id,
-        'user_name': answer.user.name if answer.user else '',
-        'correct_words': answer.correct_words,
-        'wrong_words': answer.wrong_words,
-        'percentage': answer.percentage,
-        'correct_words_list': json.loads(answer.correct_words_list) if answer.correct_words_list else [],
-        'wrong_words_list': json.loads(answer.wrong_words_list) if answer.wrong_words_list else [],
-        'submitted_at': answer.submitted_at.isoformat()
-    } for answer in answers]
-    
-    response_data = {
-        'question_id': question_id,
-        'question_text': question.text,
-        'answers': result
-    }
-    return LocalizationHelper.get_success_response('operation_successful', response_data, lang, status_code=200)
 
-@bp.route('/users/<int:user_id>/levels/<int:level_id>/videos/<int:video_id>/complete', methods=['PATCH'])
+    result = [
+        {
+            "id": answer.id,
+            "user_id": answer.user_id,
+            "user_name": answer.user.name if answer.user else "",
+            "correct_words": answer.correct_words,
+            "wrong_words": answer.wrong_words,
+            "percentage": answer.percentage,
+            "correct_words_list": (
+                json.loads(answer.correct_words_list)
+                if answer.correct_words_list
+                else []
+            ),
+            "wrong_words_list": (
+                json.loads(answer.wrong_words_list) if answer.wrong_words_list else []
+            ),
+            "submitted_at": answer.submitted_at.isoformat(),
+        }
+        for answer in answers
+    ]
+
+    response_data = {
+        "question_id": question_id,
+        "question_text": question.text,
+        "answers": result,
+    }
+    return LocalizationHelper.get_success_response(
+        "operation_successful", response_data, lang, status_code=200
+    )
+
+
+@bp.route(
+    "/users/<int:user_id>/levels/<int:level_id>/videos/<int:video_id>/complete",
+    methods=["PATCH"],
+)
 @client_required
 def complete_video(user_id, level_id, video_id):
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
 
     user = User.query.get(current_user_id)
-    if user.role != 'admin' and current_user_id != user_id:
-        return LocalizationHelper.get_error_response('access_denied', lang, 403)
+    if user.role != "admin" and current_user_id != user_id:
+        return LocalizationHelper.get_error_response("access_denied", lang, 403)
 
     user_level = UserLevel.query.filter_by(user_id=user_id, level_id=level_id).first()
     if not user_level:
-        return LocalizationHelper.get_error_response('level_not_purchased', lang, 400)
+        return LocalizationHelper.get_error_response("level_not_purchased", lang, 400)
 
     video_progress = UserVideoProgress.query.filter_by(
-        user_level_id=user_level.id,
-        video_id=video_id
+        user_level_id=user_level.id, video_id=video_id
     ).first()
 
     if not video_progress:
-        return LocalizationHelper.get_error_response('video_not_accessible', lang, 400)
+        return LocalizationHelper.get_error_response("video_not_accessible", lang, 400)
 
     video_progress.is_completed = True
 
@@ -952,11 +1194,12 @@ def complete_video(user_id, level_id, video_id):
             current_video_index = i
             break
 
-    if current_video_index is not None and (current_video_index + 1) < len(level_videos):
+    if current_video_index is not None and (current_video_index + 1) < len(
+        level_videos
+    ):
         next_video = level_videos[current_video_index + 1]
         next_video_progress = UserVideoProgress.query.filter_by(
-            user_level_id=user_level.id,
-            video_id=next_video.id
+            user_level_id=user_level.id, video_id=next_video.id
         ).first()
 
         if next_video_progress:
@@ -964,9 +1207,10 @@ def complete_video(user_id, level_id, video_id):
 
     all_videos_completed = all(
         UserVideoProgress.query.filter_by(
-            user_level_id=user_level.id,
-            video_id=video.id
-        ).first().is_completed
+            user_level_id=user_level.id, video_id=video.id
+        )
+        .first()
+        .is_completed
         for video in level_videos
     )
 
@@ -975,32 +1219,37 @@ def complete_video(user_id, level_id, video_id):
 
     db.session.commit()
 
-    return LocalizationHelper.get_success_response('video_completed_successfully', None, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "video_completed_successfully", None, lang, status_code=200
+    )
+
 
 # Exam Routes
-@bp.route('/exams/<int:level_id>/initial', methods=['POST'])
+@bp.route("/exams/<int:level_id>/initial", methods=["POST"])
 @client_required
 def submit_initial_exam(level_id):
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
     data = request.get_json()
 
-    user_level = UserLevel.query.filter_by(user_id=current_user_id, level_id=level_id).first()
+    user_level = UserLevel.query.filter_by(
+        user_id=current_user_id, level_id=level_id
+    ).first()
     if not user_level:
-        return LocalizationHelper.get_error_response('level_not_purchased', lang, 400)
+        return LocalizationHelper.get_error_response("level_not_purchased", lang, 400)
 
-    total_words = data['correct_words'] + data['wrong_words']
-    percentage = (data['correct_words'] / total_words * 100) if total_words > 0 else 0
+    total_words = data["correct_words"] + data["wrong_words"]
+    percentage = (data["correct_words"] / total_words * 100) if total_words > 0 else 0
 
     exam_result = ExamResult(
         user_id=current_user_id,
         level_id=level_id,
-        correct_words=data['correct_words'],
-        wrong_words=data['wrong_words'],
+        correct_words=data["correct_words"],
+        wrong_words=data["wrong_words"],
         percentage=percentage,
-        type='initial',
-        correct_words_list=json.dumps(data.get('correct_words_list', [])),
-        wrong_words_list=json.dumps(data.get('wrong_words_list', []))
+        type="initial",
+        correct_words_list=json.dumps(data.get("correct_words_list", [])),
+        wrong_words_list=json.dumps(data.get("wrong_words_list", [])),
     )
 
     user_level.initial_exam_score = percentage
@@ -1009,41 +1258,46 @@ def submit_initial_exam(level_id):
     db.session.commit()
 
     response_data = {
-        'user_id': current_user_id,
-        'level_id': level_id,
-        'correct_words': data['correct_words'],
-        'wrong_words': data['wrong_words'],
-        'percentage': percentage,
-        'type': 'initial'
+        "user_id": current_user_id,
+        "level_id": level_id,
+        "correct_words": data["correct_words"],
+        "wrong_words": data["wrong_words"],
+        "percentage": percentage,
+        "type": "initial",
     }
-    return LocalizationHelper.get_success_response('initial_exam_submitted', response_data, lang, status_code=201)
+    return LocalizationHelper.get_success_response(
+        "initial_exam_submitted", response_data, lang, status_code=201
+    )
 
-@bp.route('/exams/<int:level_id>/final', methods=['POST'])
+
+@bp.route("/exams/<int:level_id>/final", methods=["POST"])
 @client_required
 def submit_final_exam(level_id):
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
     data = request.get_json()
 
-    user_level = UserLevel.query.filter_by(user_id=current_user_id, level_id=level_id).first()
+    user_level = UserLevel.query.filter_by(
+        user_id=current_user_id, level_id=level_id
+    ).first()
     if not user_level:
-        return LocalizationHelper.get_error_response('level_not_purchased', lang, 400)
+        return LocalizationHelper.get_error_response("level_not_purchased", lang, 400)
 
     if not user_level.can_take_final_exam:
-        return LocalizationHelper.get_error_response('exam_not_available', lang, 400)
+        return LocalizationHelper.get_error_response("exam_not_available", lang, 400)
 
-    total_words = data['correct_words'] + data['wrong_words']
-    percentage = (data['correct_words'] / total_words * 100) if total_words > 0 else 0
+    total_words = data["correct_words"] + data["wrong_words"]
+    percentage = (data["correct_words"] / total_words * 100) if total_words > 0 else 0
 
     exam_result = ExamResult(
         user_id=current_user_id,
         level_id=level_id,
-        correct_words=data['correct_words'],
-        wrong_words=data['wrong_words'],
+        correct_words=data["correct_words"],
+        wrong_words=data["wrong_words"],
         percentage=percentage,
-        type='final',
-        correct_words_list=json.dumps(data.get('correct_words_list', [])),
-        wrong_words_list=json.dumps(data.get('wrong_words_list', []))
+        type="final",
+        correct_words_list=json.dumps(data.get("correct_words_list", [])),
+        wrong_words_list=json.dumps(data.get("wrong_words_list", [])),
     )
 
     user_level.final_exam_score = percentage
@@ -1056,78 +1310,93 @@ def submit_final_exam(level_id):
     db.session.commit()
 
     response_data = {
-        'user_id': current_user_id,
-        'level_id': level_id,
-        'correct_words': data['correct_words'],
-        'wrong_words': data['wrong_words'],
-        'percentage': percentage,
-        'type': 'final'
+        "user_id": current_user_id,
+        "level_id": level_id,
+        "correct_words": data["correct_words"],
+        "wrong_words": data["wrong_words"],
+        "percentage": percentage,
+        "type": "final",
     }
-    return LocalizationHelper.get_success_response('final_exam_submitted', response_data, lang, status_code=201)
+    return LocalizationHelper.get_success_response(
+        "final_exam_submitted", response_data, lang, status_code=201
+    )
 
-@bp.route('/exams/<int:level_id>/user/<int:user_id>', methods=['GET'])
+
+@bp.route("/exams/<int:level_id>/user/<int:user_id>", methods=["GET"])
 @client_required
 def get_user_exam_results(level_id, user_id):
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
 
     user = User.query.get(current_user_id)
-    if user.role != 'admin' and current_user_id != user_id:
-        return LocalizationHelper.get_error_response('access_denied', lang, 403)
+    if user.role != "admin" and current_user_id != user_id:
+        return LocalizationHelper.get_error_response("access_denied", lang, 403)
 
     exam_results = ExamResult.query.filter_by(user_id=user_id, level_id=level_id).all()
 
-    results = [{
-        'user_id': exam.user_id,
-        'level_id': exam.level_id,
-        'correct_words': exam.correct_words,
-        'wrong_words': exam.wrong_words,
-        'percentage': exam.percentage,
-        'type': exam.type,
-        'timestamp': exam.timestamp.isoformat()
-    } for exam in exam_results]
+    results = [
+        {
+            "user_id": exam.user_id,
+            "level_id": exam.level_id,
+            "correct_words": exam.correct_words,
+            "wrong_words": exam.wrong_words,
+            "percentage": exam.percentage,
+            "type": exam.type,
+            "timestamp": exam.timestamp.isoformat(),
+        }
+        for exam in exam_results
+    ]
 
-    return LocalizationHelper.get_success_response('operation_successful', {'exam_results': results}, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "operation_successful", {"exam_results": results}, lang, status_code=200
+    )
 
-@bp.route('/admin/exams', methods=['GET'])
+
+@bp.route("/admin/exams", methods=["GET"])
 @admin_required
 def get_all_exam_results():
     lang = ValidationHelper.get_language_from_request()
     exam_results = ExamResult.query.all()
-    result = [{
-        'id': exam.id,
-        'user_id': exam.user_id,
-        'user_name': exam.user.name if exam.user else '',
-        'level_id': exam.level_id,
-        'level_name': exam.level.name if exam.level else '',
-        'correct_words': exam.correct_words,
-        'wrong_words': exam.wrong_words,
-        'percentage': exam.percentage,
-        'type': exam.type,
-        'timestamp': exam.timestamp.isoformat()
-    } for exam in exam_results]
-    return LocalizationHelper.get_success_response('operation_successful', {'exam_results': result}, lang, status_code=200)
+    result = [
+        {
+            "id": exam.id,
+            "user_id": exam.user_id,
+            "user_name": exam.user.name if exam.user else "",
+            "level_id": exam.level_id,
+            "level_name": exam.level.name if exam.level else "",
+            "correct_words": exam.correct_words,
+            "wrong_words": exam.wrong_words,
+            "percentage": exam.percentage,
+            "type": exam.type,
+            "timestamp": exam.timestamp.isoformat(),
+        }
+        for exam in exam_results
+    ]
+    return LocalizationHelper.get_success_response(
+        "operation_successful", {"exam_results": result}, lang, status_code=200
+    )
+
 
 # Report Route
 # Updated Report Route
-@bp.route('/report', methods=['GET'])
+@bp.route("/report", methods=["GET"])
 @client_required
 def get_user_report():
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
     user = User.query.get(current_user_id)
     if not user:
-        return LocalizationHelper.get_error_response('user_not_found', lang, 404)
+        return LocalizationHelper.get_error_response("user_not_found", lang, 404)
 
-    output_format = request.args.get('format', 'markdown').lower()
+    output_format = request.args.get("format", "markdown").lower()
 
     user_data = {
-        'id': user.id,
-        'name': user.name,
-        'email': user.email,
-        'phone': user.phone or 'Not provided',
-        'role': user.role,
-        'picture': user.picture or 'Not set'
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "phone": user.phone or "Not provided",
+        "role": user.role,
+        "picture": user.picture or "Not set",
     }
 
     user_levels = UserLevel.query.filter_by(user_id=current_user_id).all()
@@ -1135,86 +1404,120 @@ def get_user_report():
 
     for user_level in user_levels:
         level = user_level.level
-        videos_progress = UserVideoProgress.query.filter_by(user_level_id=user_level.id).all()
+        videos_progress = UserVideoProgress.query.filter_by(
+            user_level_id=user_level.id
+        ).all()
         videos_data = []
 
         for progress in videos_progress:
             video = Video.query.get(progress.video_id)
-            questions = Question.query.filter_by(video_id=video.id).order_by(Question.order).all()
+            questions = (
+                Question.query.filter_by(video_id=video.id)
+                .order_by(Question.order)
+                .all()
+            )
             questions_data = []
-            
+
             for question in questions:
                 user_answer = UserQuestionAnswer.query.filter_by(
                     user_id=current_user_id, question_id=question.id
                 ).first()
-                
-                question_data = {
-                    'question_id': question.id,
-                    'question_text': question.text,
-                    'question_order': question.order
-                }
-                
-                if user_answer:
-                    question_data.update({
-                        'correct_words': user_answer.correct_words,
-                        'wrong_words': user_answer.wrong_words,
-                        'percentage': user_answer.percentage,
-                        'correct_words_list': json.loads(user_answer.correct_words_list) if user_answer.correct_words_list else [],
-                        'wrong_words_list': json.loads(user_answer.wrong_words_list) if user_answer.wrong_words_list else [],
-                        'submitted_at': user_answer.submitted_at.isoformat()
-                    })
-                else:
-                    question_data.update({
-                        'correct_words': None,
-                        'wrong_words': None,
-                        'percentage': None,
-                        'correct_words_list': [],
-                        'wrong_words_list': [],
-                        'submitted_at': None
-                    })
-                
-                questions_data.append(question_data)
-            
-            videos_data.append({
-                'video_id': video.id,
-                'youtube_link': video.youtube_link,
-                'is_opened': progress.is_opened,
-                'is_completed': progress.is_completed,
-                'questions': questions_data
-            })
 
-        exams = ExamResult.query.filter_by(user_id=current_user_id, level_id=level.id).all()
+                question_data = {
+                    "question_id": question.id,
+                    "question_text": question.text,
+                    "question_order": question.order,
+                }
+
+                if user_answer:
+                    question_data.update(
+                        {
+                            "correct_words": user_answer.correct_words,
+                            "wrong_words": user_answer.wrong_words,
+                            "percentage": user_answer.percentage,
+                            "correct_words_list": (
+                                json.loads(user_answer.correct_words_list)
+                                if user_answer.correct_words_list
+                                else []
+                            ),
+                            "wrong_words_list": (
+                                json.loads(user_answer.wrong_words_list)
+                                if user_answer.wrong_words_list
+                                else []
+                            ),
+                            "submitted_at": user_answer.submitted_at.isoformat(),
+                        }
+                    )
+                else:
+                    question_data.update(
+                        {
+                            "correct_words": None,
+                            "wrong_words": None,
+                            "percentage": None,
+                            "correct_words_list": [],
+                            "wrong_words_list": [],
+                            "submitted_at": None,
+                        }
+                    )
+
+                questions_data.append(question_data)
+
+            videos_data.append(
+                {
+                    "video_id": video.id,
+                    "youtube_link": video.youtube_link,
+                    "is_opened": progress.is_opened,
+                    "is_completed": progress.is_completed,
+                    "questions": questions_data,
+                }
+            )
+
+        exams = ExamResult.query.filter_by(
+            user_id=current_user_id, level_id=level.id
+        ).all()
         exams_data = []
 
         for exam in exams:
-            exams_data.append({
-                'type': exam.type,
-                'correct_words': exam.correct_words,
-                'wrong_words': exam.wrong_words,
-                'percentage': exam.percentage,
-                'correct_words_list': json.loads(exam.correct_words_list) if exam.correct_words_list else [],
-                'wrong_words_list': json.loads(exam.wrong_words_list) if exam.wrong_words_list else [],
-                'timestamp': exam.timestamp.isoformat()
-            })
+            exams_data.append(
+                {
+                    "type": exam.type,
+                    "correct_words": exam.correct_words,
+                    "wrong_words": exam.wrong_words,
+                    "percentage": exam.percentage,
+                    "correct_words_list": (
+                        json.loads(exam.correct_words_list)
+                        if exam.correct_words_list
+                        else []
+                    ),
+                    "wrong_words_list": (
+                        json.loads(exam.wrong_words_list)
+                        if exam.wrong_words_list
+                        else []
+                    ),
+                    "timestamp": exam.timestamp.isoformat(),
+                }
+            )
 
         level_data = {
-            'level_id': level.id,
-            'level_name': level.name,
-            'level_description': level.description or 'No description',
-            'level_number': level.level_number,
-            'is_completed': user_level.is_completed,
-            'can_take_final_exam': user_level.can_take_final_exam,
-            'initial_exam_score': user_level.initial_exam_score,
-            'final_exam_score': user_level.final_exam_score,
-            'score_difference': user_level.score_difference,
-            'videos': videos_data,
-            'exams': exams_data
+            "level_id": level.id,
+            "level_name": level.name,
+            "level_description": level.description or "No description",
+            "level_number": level.level_number,
+            "is_completed": user_level.is_completed,
+            "can_take_final_exam": user_level.can_take_final_exam,
+            "initial_exam_score": user_level.initial_exam_score,
+            "final_exam_score": user_level.final_exam_score,
+            "score_difference": user_level.score_difference,
+            "videos": videos_data,
+            "exams": exams_data,
         }
         levels_data.append(level_data)
 
-    if output_format == 'json':
-        report = {'user': user_data, 'levels': levels_data}
-        return LocalizationHelper.get_success_response('operation_successful', report, lang, status_code=200)
+    if output_format == "json":
+        report = {"user": user_data, "levels": levels_data}
+        return LocalizationHelper.get_success_response(
+            "operation_successful", report, lang, status_code=200
+        )
     else:
         markdown_content = f"""
 # User Progress Report
@@ -1250,7 +1553,7 @@ Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
 #### Videos and Questions
 
 """
-            for video in level['videos']:
+            for video in level["videos"]:
                 markdown_content += f"""
 ##### Video ID: {video['video_id']}
 - *YouTube Link*: {video['youtube_link']}
@@ -1262,7 +1565,7 @@ Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
 | Question ID | Text | Order | Correct Words | Wrong Words | Percentage | Correct Words List | Wrong Words List | Submitted At |
 |-------------|------|-------|---------------|-------------|------------|--------------------|------------------|--------------|
 """
-                for question in video['questions']:
+                for question in video["questions"]:
                     markdown_content += f"""
 | {question['question_id']} | {question['question_text'][:50]}... | {question['question_order']} | {question['correct_words'] if question['correct_words'] is not None else 'N/A'} | {question['wrong_words'] if question['wrong_words'] is not None else 'N/A'} | {round(question['percentage'], 2) if question['percentage'] is not None else 'N/A'} | {', '.join(question['correct_words_list']) if question['correct_words_list'] else 'None'} | {', '.join(question['wrong_words_list']) if question['wrong_words_list'] else 'None'} | {question['submitted_at'] if question['submitted_at'] else 'Not submitted'} |
 """
@@ -1273,25 +1576,28 @@ Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
 | Type | Timestamp | Correct Words | Wrong Words | Percentage | Correct Words List | Wrong Words List |
 |------|-----------|---------------|-------------|------------|--------------------|------------------|
 """
-            for exam in level['exams']:
+            for exam in level["exams"]:
                 markdown_content += f"""
 | {exam['type'].capitalize()} | {exam['timestamp']} | {exam['correct_words']} | {exam['wrong_words']} | {round(exam['percentage'], 2)} | {', '.join(exam['correct_words_list']) if exam['correct_words_list'] else 'None'} | {', '.join(exam['wrong_words_list']) if exam['wrong_words_list'] else 'None'} |
 """
-        
+
         response = make_response(markdown_content)
-        response.headers['Content-Type'] = 'text/markdown'
-        response.headers['Content-Disposition'] = f'inline; filename=user_report_{user.id}.md'
+        response.headers["Content-Type"] = "text/markdown"
+        response.headers["Content-Disposition"] = (
+            f"inline; filename=user_report_{user.id}.md"
+        )
         return response
 
-@bp.route('/users/<int:user_id>/levels', methods=['GET'])
+
+@bp.route("/users/<int:user_id>/levels", methods=["GET"])
 @client_required
 def get_user_levels(user_id):
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
     user = User.query.get(current_user_id)
-    
-    if user.role != 'admin' and current_user_id != user_id:
-        return LocalizationHelper.get_error_response('access_denied', lang, 403)
+
+    if user.role != "admin" and current_user_id != user_id:
+        return LocalizationHelper.get_error_response("access_denied", lang, 403)
 
     user_levels = UserLevel.query.filter_by(user_id=user_id).all()
     result = []
@@ -1303,8 +1609,7 @@ def get_user_levels(user_id):
 
         for video in level.videos:
             video_progress = UserVideoProgress.query.filter_by(
-                user_level_id=user_level.id,
-                video_id=video.id
+                user_level_id=user_level.id, video_id=video.id
             ).first()
 
             is_opened = video_progress.is_opened if video_progress else False
@@ -1313,75 +1618,88 @@ def get_user_levels(user_id):
                 completed_videos_count += 1
 
             questions_data = []
-            if user.role == 'admin' or is_opened:
-                questions = Question.query.filter_by(video_id=video.id).order_by(Question.order).all()
+            if user.role == "admin" or is_opened:
+                questions = (
+                    Question.query.filter_by(video_id=video.id)
+                    .order_by(Question.order)
+                    .all()
+                )
                 for question in questions:
                     user_answer = UserQuestionAnswer.query.filter_by(
                         user_id=user_id, question_id=question.id
                     ).first()
                     question_data = {
-                        'id': question.id,
-                        'order': question.order,
-                        'text': question.text
+                        "id": question.id,
+                        "order": question.order,
+                        "text": question.text,
                     }
                     if user_answer:
-                        question_data['user_answer'] = {
-                            'correct_words': user_answer.correct_words,
-                            'wrong_words': user_answer.wrong_words,
-                            'percentage': user_answer.percentage,
-                            'submitted_at': user_answer.submitted_at.isoformat()
+                        question_data["user_answer"] = {
+                            "correct_words": user_answer.correct_words,
+                            "wrong_words": user_answer.wrong_words,
+                            "percentage": user_answer.percentage,
+                            "submitted_at": user_answer.submitted_at.isoformat(),
                         }
                     questions_data.append(question_data)
 
             video_data = {
-                'id': video.id,
-                'youtube_link': video.youtube_link if user.role == 'admin' or is_opened else '',
-                'is_opened': is_opened,
-                'is_completed': is_completed,
-                'questions': questions_data
+                "id": video.id,
+                "youtube_link": (
+                    video.youtube_link if user.role == "admin" or is_opened else ""
+                ),
+                "is_opened": is_opened,
+                "is_completed": is_completed,
+                "questions": questions_data,
             }
             videos.append(video_data)
 
         level_data = {
-            'user_id': user_id,
-            'level_id': level.id,
-            'level_name': level.name,
-            'level_number': level.level_number,
-            'welcome_video_url': level.welcome_video_url,
-            'videos_count': len(level.videos),
-            'completed_videos_count': completed_videos_count,
-            'videos': videos,
-            'is_completed': user_level.is_completed,
-            'can_take_final_exam': user_level.can_take_final_exam,
-            'initial_exam_score': user_level.initial_exam_score,
-            'final_exam_score': user_level.final_exam_score,
-            'score_difference': user_level.score_difference
+            "user_id": user_id,
+            "level_id": level.id,
+            "level_name": level.name,
+            "level_number": level.level_number,
+            "welcome_video_url": level.welcome_video_url,
+            "videos_count": len(level.videos),
+            "completed_videos_count": completed_videos_count,
+            "videos": videos,
+            "is_completed": user_level.is_completed,
+            "can_take_final_exam": user_level.can_take_final_exam,
+            "initial_exam_score": user_level.initial_exam_score,
+            "final_exam_score": user_level.final_exam_score,
+            "score_difference": user_level.score_difference,
         }
         result.append(level_data)
 
-    return LocalizationHelper.get_success_response('operation_successful', {'levels': result}, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "operation_successful", {"levels": result}, lang, status_code=200
+    )
 
-@bp.route('/users/<int:user_id>/levels/<int:level_id>/purchase', methods=['POST'])
+
+@bp.route("/users/<int:user_id>/levels/<int:level_id>/purchase", methods=["POST"])
 @client_required
 def purchase_level(user_id, level_id):
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
 
     user = User.query.get(current_user_id)
-    if user.role != 'admin' and current_user_id != user_id:
-        return LocalizationHelper.get_error_response('access_denied', lang, 403)
+    if user.role != "admin" and current_user_id != user_id:
+        return LocalizationHelper.get_error_response("access_denied", lang, 403)
 
     level = Level.query.get_or_404(level_id)
 
-    existing_user_level = UserLevel.query.filter_by(user_id=user_id, level_id=level_id).first()
+    existing_user_level = UserLevel.query.filter_by(
+        user_id=user_id, level_id=level_id
+    ).first()
     if existing_user_level:
-        return LocalizationHelper.get_error_response('level_already_purchased', lang, 400)
+        return LocalizationHelper.get_error_response(
+            "level_already_purchased", lang, 400
+        )
 
     user_level = UserLevel(
         user_id=user_id,
         level_id=level_id,
         is_completed=False,
-        can_take_final_exam=False
+        can_take_final_exam=False,
     )
 
     db.session.add(user_level)
@@ -1399,34 +1717,38 @@ def purchase_level(user_id, level_id):
                     user_level_id=user_level.id,
                     video_id=video.id,
                     is_opened=(i == 0),
-                    is_completed=False
+                    is_completed=False,
                 )
                 db.session.add(video_progress)
 
         db.session.commit()
-        return LocalizationHelper.get_success_response('level_purchased_successfully', None, lang, status_code=201)
+        return LocalizationHelper.get_success_response(
+            "level_purchased_successfully", None, lang, status_code=201
+        )
 
     except IntegrityError:
         db.session.rollback()
-        return LocalizationHelper.get_error_response('database_error', lang, 400)
+        return LocalizationHelper.get_error_response("database_error", lang, 400)
 
-@bp.route('/users/<int:user_id>/levels/<int:level_id>/update_progress', methods=['PATCH'])
+
+@bp.route(
+    "/users/<int:user_id>/levels/<int:level_id>/update_progress", methods=["PATCH"]
+)
 @client_required
 def update_level_progress(user_id, level_id):
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
 
     user = User.query.get(current_user_id)
-    if user.role != 'admin' and current_user_id != user_id:
-        return LocalizationHelper.get_error_response('access_denied', lang, 403)
+    if user.role != "admin" and current_user_id != user_id:
+        return LocalizationHelper.get_error_response("access_denied", lang, 403)
 
     user_level = UserLevel.query.filter_by(user_id=user_id, level_id=level_id).first()
     if not user_level:
-        return LocalizationHelper.get_error_response('level_not_purchased', lang, 400)
+        return LocalizationHelper.get_error_response("level_not_purchased", lang, 400)
 
     completed_videos = UserVideoProgress.query.filter_by(
-        user_level_id=user_level.id,
-        is_completed=True
+        user_level_id=user_level.id, is_completed=True
     ).count()
 
     total_videos = Video.query.filter_by(level_id=level_id).count()
@@ -1437,333 +1759,439 @@ def update_level_progress(user_id, level_id):
     db.session.commit()
 
     response_data = {
-        'completed_videos_count': completed_videos,
-        'total_videos_count': total_videos,
-        'can_take_final_exam': user_level.can_take_final_exam
+        "completed_videos_count": completed_videos,
+        "total_videos_count": total_videos,
+        "can_take_final_exam": user_level.can_take_final_exam,
     }
-    return LocalizationHelper.get_success_response('operation_successful', response_data, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "operation_successful", response_data, lang, status_code=200
+    )
+
 
 # Statistics Routes (Admin only)
-@bp.route('/admin/statistics', methods=['GET'])
+@bp.route("/admin/statistics", methods=["GET"])
 @admin_required
 def get_admin_statistics():
     lang = ValidationHelper.get_language_from_request()
-    total_users = User.query.filter_by(role='client').count()
+    total_users = User.query.filter_by(role="client").count()
     total_levels = Level.query.count()
     total_purchases = UserLevel.query.count()
     completed_levels = UserLevel.query.filter_by(is_completed=True).count()
 
-    completion_rate = (completed_levels / total_purchases * 100) if total_purchases > 0 else 0
+    completion_rate = (
+        (completed_levels / total_purchases * 100) if total_purchases > 0 else 0
+    )
 
-    popular_levels = db.session.query(
-        Level.name,
-        db.func.count(UserLevel.id).label('purchases')
-    ).join(UserLevel).group_by(Level.id).order_by(db.desc('purchases')).limit(5).all()
+    popular_levels = (
+        db.session.query(Level.name, db.func.count(UserLevel.id).label("purchases"))
+        .join(UserLevel)
+        .group_by(Level.id)
+        .order_by(db.desc("purchases"))
+        .limit(5)
+        .all()
+    )
 
     response_data = {
-        'total_users': total_users,
-        'total_levels': total_levels,
-        'total_purchases': total_purchases,
-        'completed_levels': completed_levels,
-        'completion_rate': round(completion_rate, 2),
-        'popular_levels': [{'name': level, 'purchases': purchases} for level, purchases in popular_levels]
+        "total_users": total_users,
+        "total_levels": total_levels,
+        "total_purchases": total_purchases,
+        "completed_levels": completed_levels,
+        "completion_rate": round(completion_rate, 2),
+        "popular_levels": [
+            {"name": level, "purchases": purchases}
+            for level, purchases in popular_levels
+        ],
     }
-    return LocalizationHelper.get_success_response('¦', response_data, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "¦", response_data, lang, status_code=200
+    )
 
-@bp.route('/admin/users/<int:user_id>/statistics', methods=['GET'])
+
+@bp.route("/admin/users/<int:user_id>/statistics", methods=["GET"])
 @admin_required
 def get_user_statistics(user_id):
     lang = ValidationHelper.get_language_from_request()
     user = User.query.get_or_404(user_id)
 
     purchased_levels = UserLevel.query.filter_by(user_id=user_id).count()
-    completed_levels = UserLevel.query.filter_by(user_id=user_id, is_completed=True).count()
+    completed_levels = UserLevel.query.filter_by(
+        user_id=user_id, is_completed=True
+    ).count()
 
     exam_results = ExamResult.query.filter_by(user_id=user_id).all()
 
-    initial_scores = [exam.percentage for exam in exam_results if exam.type == 'initial']
-    final_scores = [exam.percentage for exam in exam_results if exam.type == 'final']
+    initial_scores = [
+        exam.percentage for exam in exam_results if exam.type == "initial"
+    ]
+    final_scores = [exam.percentage for exam in exam_results if exam.type == "final"]
 
-    avg_initial_score = sum(initial_scores) / len(initial_scores) if initial_scores else 0
+    avg_initial_score = (
+        sum(initial_scores) / len(initial_scores) if initial_scores else 0
+    )
     avg_final_score = sum(final_scores) / len(final_scores) if final_scores else 0
-    avg_improvement = avg_final_score - avg_initial_score if initial_scores and final_scores else 0
+    avg_improvement = (
+        avg_final_score - avg_initial_score if initial_scores and final_scores else 0
+    )
 
-    total_questions_answered = UserQuestionAnswer.query.filter_by(user_id=user_id).count()
-    avg_question_score = db.session.query(db.func.avg(UserQuestionAnswer.percentage)).filter_by(user_id=user_id).scalar() or 0
+    total_questions_answered = UserQuestionAnswer.query.filter_by(
+        user_id=user_id
+    ).count()
+    avg_question_score = (
+        db.session.query(db.func.avg(UserQuestionAnswer.percentage))
+        .filter_by(user_id=user_id)
+        .scalar()
+        or 0
+    )
 
     response_data = {
-        'user_id': user_id,
-        'user_name': user.name,
-        'purchased_levels': purchased_levels,
-        'completed_levels': completed_levels,
-        'completion_rate': round((completed_levels / purchased_levels * 100) if purchased_levels > 0 else 0, 2),
-        'average_initial_score': round(avg_initial_score, 2),
-        'average_final_score': round(avg_final_score, 2),
-        'average_improvement': round(avg_improvement, 2),
-        'total_exams_taken': len(exam_results),
-        'total_questions_answered': total_questions_answered,
-        'average_question_score': round(avg_question_score, 2)
+        "user_id": user_id,
+        "user_name": user.name,
+        "purchased_levels": purchased_levels,
+        "completed_levels": completed_levels,
+        "completion_rate": round(
+            (completed_levels / purchased_levels * 100) if purchased_levels > 0 else 0,
+            2,
+        ),
+        "average_initial_score": round(avg_initial_score, 2),
+        "average_final_score": round(avg_final_score, 2),
+        "average_improvement": round(avg_improvement, 2),
+        "total_exams_taken": len(exam_results),
+        "total_questions_answered": total_questions_answered,
+        "average_question_score": round(avg_question_score, 2),
     }
-    return LocalizationHelper.get_success_response('operation_successful', response_data, lang, status_code=200)
+    return LocalizationHelper.get_success_response(
+        "operation_successful", response_data, lang, status_code=200
+    )
 
 
-
-@bp.route('/admin/users/export', methods=['GET'])
+@bp.route("/admin/users/export", methods=["GET"])
 @admin_required
 def export_users_excel():
     """Export all users data to Excel file"""
     lang = ValidationHelper.get_language_from_request()
-    
+
     try:
         # Get all users with their level information
         users = User.query.all()
-        
+
         # Prepare data for Excel
         users_data = []
         for user in users:
             user_levels = UserLevel.query.filter_by(user_id=user.id).all()
-            
+
             # Calculate user statistics
             total_levels = len(user_levels)
             completed_levels = sum(1 for ul in user_levels if ul.is_completed)
-            completion_rate = (completed_levels / total_levels * 100) if total_levels > 0 else 0
-            
+            completion_rate = (
+                (completed_levels / total_levels * 100) if total_levels > 0 else 0
+            )
+
             # Get exam scores
             exam_results = ExamResult.query.filter_by(user_id=user.id).all()
-            initial_scores = [exam.percentage for exam in exam_results if exam.type == 'initial']
-            final_scores = [exam.percentage for exam in exam_results if exam.type == 'final']
-            
-            avg_initial_score = sum(initial_scores) / len(initial_scores) if initial_scores else 0
-            avg_final_score = sum(final_scores) / len(final_scores) if final_scores else 0
-            avg_improvement = avg_final_score - avg_initial_score if initial_scores and final_scores else 0
-            
+            initial_scores = [
+                exam.percentage for exam in exam_results if exam.type == "initial"
+            ]
+            final_scores = [
+                exam.percentage for exam in exam_results if exam.type == "final"
+            ]
+
+            avg_initial_score = (
+                sum(initial_scores) / len(initial_scores) if initial_scores else 0
+            )
+            avg_final_score = (
+                sum(final_scores) / len(final_scores) if final_scores else 0
+            )
+            avg_improvement = (
+                avg_final_score - avg_initial_score
+                if initial_scores and final_scores
+                else 0
+            )
+
             # Get questions answered
-            total_questions = UserQuestionAnswer.query.filter_by(user_id=user.id).count()
-            avg_question_score = db.session.query(db.func.avg(UserQuestionAnswer.percentage)).filter_by(user_id=user.id).scalar() or 0
-            
-            users_data.append({
-                'User ID': user.id,
-                'Name': user.name,
-                'Email': user.email,
-                'Phone': user.phone or 'N/A',
-                'Role': user.role.capitalize(),
-                'Total Levels Purchased': total_levels,
-                'Levels Completed': completed_levels,
-                'Completion Rate (%)': round(completion_rate, 2),
-                'Average Initial Exam Score': round(avg_initial_score, 2),
-                'Average Final Exam Score': round(avg_final_score, 2),
-                'Average Improvement': round(avg_improvement, 2),
-                'Total Exams Taken': len(exam_results),
-                'Total Questions Answered': total_questions,
-                'Average Question Score': round(avg_question_score, 2),
-                'Registration Date': 'N/A'  # Add if you have created_at field
-            })
-        
+            total_questions = UserQuestionAnswer.query.filter_by(
+                user_id=user.id
+            ).count()
+            avg_question_score = (
+                db.session.query(db.func.avg(UserQuestionAnswer.percentage))
+                .filter_by(user_id=user.id)
+                .scalar()
+                or 0
+            )
+
+            users_data.append(
+                {
+                    "User ID": user.id,
+                    "Name": user.name,
+                    "Email": user.email,
+                    "Phone": user.phone or "N/A",
+                    "Role": user.role.capitalize(),
+                    "Total Levels Purchased": total_levels,
+                    "Levels Completed": completed_levels,
+                    "Completion Rate (%)": round(completion_rate, 2),
+                    "Average Initial Exam Score": round(avg_initial_score, 2),
+                    "Average Final Exam Score": round(avg_final_score, 2),
+                    "Average Improvement": round(avg_improvement, 2),
+                    "Total Exams Taken": len(exam_results),
+                    "Total Questions Answered": total_questions,
+                    "Average Question Score": round(avg_question_score, 2),
+                    "Registration Date": "N/A",  # Add if you have created_at field
+                }
+            )
+
         # Create DataFrame
         df = pd.DataFrame(users_data)
-        
+
         # Create Excel file in memory
         output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
             # Users summary sheet
-            df.to_excel(writer, sheet_name='Users Summary', index=False)
-            
+            df.to_excel(writer, sheet_name="Users Summary", index=False)
+
             # Detailed levels sheet
             levels_data = []
             for user in users:
                 user_levels = UserLevel.query.filter_by(user_id=user.id).all()
                 for user_level in user_levels:
                     level = user_level.level
-                    levels_data.append({
-                        'User ID': user.id,
-                        'User Name': user.name,
-                        'User Email': user.email,
-                        'Level ID': level.id,
-                        'Level Name': level.name,
-                        'Level Number': level.level_number,
-                        'Level Price': level.price,
-                        'Is Completed': 'Yes' if user_level.is_completed else 'No',
-                        'Can Take Final Exam': 'Yes' if user_level.can_take_final_exam else 'No',
-                        'Initial Exam Score': user_level.initial_exam_score or 'N/A',
-                        'Final Exam Score': user_level.final_exam_score or 'N/A',
-                        'Score Difference': user_level.score_difference or 'N/A'
-                    })
-            
+                    levels_data.append(
+                        {
+                            "User ID": user.id,
+                            "User Name": user.name,
+                            "User Email": user.email,
+                            "Level ID": level.id,
+                            "Level Name": level.name,
+                            "Level Number": level.level_number,
+                            "Level Price": level.price,
+                            "Is Completed": "Yes" if user_level.is_completed else "No",
+                            "Can Take Final Exam": (
+                                "Yes" if user_level.can_take_final_exam else "No"
+                            ),
+                            "Initial Exam Score": user_level.initial_exam_score
+                            or "N/A",
+                            "Final Exam Score": user_level.final_exam_score or "N/A",
+                            "Score Difference": user_level.score_difference or "N/A",
+                        }
+                    )
+
             if levels_data:
                 levels_df = pd.DataFrame(levels_data)
-                levels_df.to_excel(writer, sheet_name='User Levels Detail', index=False)
-            
+                levels_df.to_excel(writer, sheet_name="User Levels Detail", index=False)
+
             # Exam results sheet
             exam_results = ExamResult.query.all()
             exam_data = []
             for exam in exam_results:
-                exam_data.append({
-                    'User ID': exam.user_id,
-                    'User Name': exam.user.name if exam.user else 'N/A',
-                    'Level ID': exam.level_id,
-                    'Level Name': exam.level.name if exam.level else 'N/A',
-                    'Exam Type': exam.type.capitalize(),
-                    'Correct Words': exam.correct_words,
-                    'Wrong Words': exam.wrong_words,
-                    'Percentage': exam.percentage,
-                    'Date': exam.timestamp.strftime('%Y-%m-%d %H:%M:%S')
-                })
-            
+                exam_data.append(
+                    {
+                        "User ID": exam.user_id,
+                        "User Name": exam.user.name if exam.user else "N/A",
+                        "Level ID": exam.level_id,
+                        "Level Name": exam.level.name if exam.level else "N/A",
+                        "Exam Type": exam.type.capitalize(),
+                        "Correct Words": exam.correct_words,
+                        "Wrong Words": exam.wrong_words,
+                        "Percentage": exam.percentage,
+                        "Date": exam.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                )
+
             if exam_data:
                 exam_df = pd.DataFrame(exam_data)
-                exam_df.to_excel(writer, sheet_name='Exam Results', index=False)
-        
+                exam_df.to_excel(writer, sheet_name="Exam Results", index=False)
+
         output.seek(0)
-        
+
         # Generate filename with timestamp
         filename = f"users_export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        
+
         return send_file(
             output,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             as_attachment=True,
-            download_name=filename
+            download_name=filename,
         )
-        
-    except Exception as e:
-        return LocalizationHelper.get_error_response('operation_failed', lang, 500)
 
-@bp.route('/report/pdf', methods=['GET'])
+    except Exception as e:
+        return LocalizationHelper.get_error_response("operation_failed", lang, 500)
+
+
+@bp.route("/report/pdf", methods=["GET"])
 @client_required
 def get_user_report_pdf():
     """Generate and download user progress report as PDF"""
     current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
-    
+
     user = User.query.get(current_user_id)
     if not user:
-        return LocalizationHelper.get_error_response('user_not_found', lang, 404)
-    
+        return LocalizationHelper.get_error_response("user_not_found", lang, 404)
+
     try:
         # Create temporary file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         temp_filename = temp_file.name
         temp_file.close()
-        
+
         # Create PDF document
         doc = SimpleDocTemplate(temp_filename, pagesize=A4)
         styles = getSampleStyleSheet()
         story = []
-        
+
         # Custom styles
         title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
+            "CustomTitle",
+            parent=styles["Heading1"],
             fontSize=24,
             spaceAfter=30,
             alignment=TA_CENTER,
-            textColor=colors.darkblue
+            textColor=colors.darkblue,
         )
-        
+
         heading_style = ParagraphStyle(
-            'CustomHeading',
-            parent=styles['Heading2'],
+            "CustomHeading",
+            parent=styles["Heading2"],
             fontSize=16,
             spaceAfter=12,
-            textColor=colors.darkblue
+            textColor=colors.darkblue,
         )
-        
+
         subheading_style = ParagraphStyle(
-            'CustomSubHeading',
-            parent=styles['Heading3'],
+            "CustomSubHeading",
+            parent=styles["Heading3"],
             fontSize=14,
             spaceAfter=10,
-            textColor=colors.blue
+            textColor=colors.blue,
         )
-        
+
         # Title
         story.append(Paragraph("User Progress Report", title_style))
         story.append(Spacer(1, 20))
-        
+
         # Report info
-        report_info = f"Generated on {datetime.utcnow().strftime('%B %d, %Y at %H:%M UTC')}"
-        story.append(Paragraph(report_info, styles['Normal']))
+        report_info = (
+            f"Generated on {datetime.utcnow().strftime('%B %d, %Y at %H:%M UTC')}"
+        )
+        story.append(Paragraph(report_info, styles["Normal"]))
         story.append(Spacer(1, 30))
-        
+
         # User Information Section
         story.append(Paragraph("User Information", heading_style))
-        
+
         user_data = [
-            ['Name', user.name],
-            ['Email', user.email],
-            ['Phone', user.phone or 'Not provided'],
-            ['User ID', str(user.id)],
-            ['Role', user.role.capitalize()]
+            ["Name", user.name],
+            ["Email", user.email],
+            ["Phone", user.phone or "Not provided"],
+            ["User ID", str(user.id)],
+            ["Role", user.role.capitalize()],
         ]
-        
-        user_table = Table(user_data, colWidths=[2*inch, 4*inch])
-        user_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (0, -1), colors.lightblue),
-            ('TEXTCOLOR', (0, 0), (0, -1), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
-            ('BACKGROUND', (1, 0), (1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        
+
+        user_table = Table(user_data, colWidths=[2 * inch, 4 * inch])
+        user_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (0, -1), colors.lightblue),
+                    ("TEXTCOLOR", (0, 0), (0, -1), colors.whitesmoke),
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 10),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+                    ("BACKGROUND", (1, 0), (1, -1), colors.beige),
+                    ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                ]
+            )
+        )
+
         story.append(user_table)
         story.append(Spacer(1, 30))
-        
+
         # Levels Progress Section
         story.append(Paragraph("Levels Progress", heading_style))
-        
+
         user_levels = UserLevel.query.filter_by(user_id=current_user_id).all()
-        
+
         if not user_levels:
-            story.append(Paragraph("No levels enrolled.", styles['Normal']))
+            story.append(Paragraph("No levels enrolled.", styles["Normal"]))
         else:
             for i, user_level in enumerate(user_levels):
                 level = user_level.level
-                
+
                 # Level header
                 level_title = f"Level {level.level_number}: {level.name}"
                 story.append(Paragraph(level_title, subheading_style))
-                
+
                 # Level info table
                 level_info = [
-                    ['Description', level.description or 'No description'],
-                    ['Status', 'Completed' if user_level.is_completed else 'In Progress'],
-                    ['Can Take Final Exam', 'Yes' if user_level.can_take_final_exam else 'No'],
-                    ['Initial Exam Score', f"{user_level.initial_exam_score:.2f}%" if user_level.initial_exam_score is not None else 'Not taken'],
-                    ['Final Exam Score', f"{user_level.final_exam_score:.2f}%" if user_level.final_exam_score is not None else 'Not taken'],
-                    ['Score Improvement', f"{user_level.score_difference:.2f}%" if user_level.score_difference is not None else 'N/A']
+                    ["Description", level.description or "No description"],
+                    [
+                        "Status",
+                        "Completed" if user_level.is_completed else "In Progress",
+                    ],
+                    [
+                        "Can Take Final Exam",
+                        "Yes" if user_level.can_take_final_exam else "No",
+                    ],
+                    [
+                        "Initial Exam Score",
+                        (
+                            f"{user_level.initial_exam_score:.2f}%"
+                            if user_level.initial_exam_score is not None
+                            else "Not taken"
+                        ),
+                    ],
+                    [
+                        "Final Exam Score",
+                        (
+                            f"{user_level.final_exam_score:.2f}%"
+                            if user_level.final_exam_score is not None
+                            else "Not taken"
+                        ),
+                    ],
+                    [
+                        "Score Improvement",
+                        (
+                            f"{user_level.score_difference:.2f}%"
+                            if user_level.score_difference is not None
+                            else "N/A"
+                        ),
+                    ],
                 ]
-                
-                level_table = Table(level_info, colWidths=[2*inch, 4*inch])
-                level_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
-                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                    ('FONTSIZE', (0, 0), (-1, -1), 9),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
-                ]))
-                
+
+                level_table = Table(level_info, colWidths=[2 * inch, 4 * inch])
+                level_table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+                            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                            ("FONTSIZE", (0, 0), (-1, -1), 9),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                            ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                        ]
+                    )
+                )
+
                 story.append(level_table)
                 story.append(Spacer(1, 15))
-                
+
                 # Videos and Questions Summary
-                videos_progress = UserVideoProgress.query.filter_by(user_level_id=user_level.id).all()
-                
+                videos_progress = UserVideoProgress.query.filter_by(
+                    user_level_id=user_level.id
+                ).all()
+
                 if videos_progress:
-                    story.append(Paragraph("Videos Progress:", styles['Heading4']))
-                    
-                    video_data = [['Video ID', 'Status', 'Questions Answered', 'Avg Score']]
-                    
+                    story.append(Paragraph("Videos Progress:", styles["Heading4"]))
+
+                    video_data = [
+                        ["Video ID", "Status", "Questions Answered", "Avg Score"]
+                    ]
+
                     for progress in videos_progress:
                         video = Video.query.get(progress.video_id)
                         questions = Question.query.filter_by(video_id=video.id).all()
-                        
+
                         answered_questions = 0
                         total_score = 0
-                        
+
                         for question in questions:
                             answer = UserQuestionAnswer.query.filter_by(
                                 user_id=current_user_id, question_id=question.id
@@ -1771,98 +2199,142 @@ def get_user_report_pdf():
                             if answer:
                                 answered_questions += 1
                                 total_score += answer.percentage
-                        
-                        avg_score = (total_score / answered_questions) if answered_questions > 0 else 0
-                        status = 'Completed' if progress.is_completed else ('Opened' if progress.is_opened else 'Locked')
-                        
-                        video_data.append([
-                            str(video.id),
-                            status,
-                            f"{answered_questions}/{len(questions)}",
-                            f"{avg_score:.1f}%" if answered_questions > 0 else 'N/A'
-                        ])
-                    
-                    video_table = Table(video_data, colWidths=[1*inch, 1.5*inch, 1.5*inch, 1.5*inch])
-                    video_table.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                        ('FONTSIZE', (0, 0), (-1, -1), 8),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-                    ]))
-                    
+
+                        avg_score = (
+                            (total_score / answered_questions)
+                            if answered_questions > 0
+                            else 0
+                        )
+                        status = (
+                            "Completed"
+                            if progress.is_completed
+                            else ("Opened" if progress.is_opened else "Locked")
+                        )
+
+                        video_data.append(
+                            [
+                                str(video.id),
+                                status,
+                                f"{answered_questions}/{len(questions)}",
+                                (
+                                    f"{avg_score:.1f}%"
+                                    if answered_questions > 0
+                                    else "N/A"
+                                ),
+                            ]
+                        )
+
+                    video_table = Table(
+                        video_data,
+                        colWidths=[1 * inch, 1.5 * inch, 1.5 * inch, 1.5 * inch],
+                    )
+                    video_table.setStyle(
+                        TableStyle(
+                            [
+                                ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+                                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                                ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                            ]
+                        )
+                    )
+
                     story.append(video_table)
                     story.append(Spacer(1, 20))
-                
+
                 # Exam Results for this level
-                exams = ExamResult.query.filter_by(user_id=current_user_id, level_id=level.id).all()
-                
+                exams = ExamResult.query.filter_by(
+                    user_id=current_user_id, level_id=level.id
+                ).all()
+
                 if exams:
-                    story.append(Paragraph("Exam Results:", styles['Heading4']))
-                    
-                    exam_data = [['Type', 'Date', 'Correct Words', 'Wrong Words', 'Score']]
-                    
+                    story.append(Paragraph("Exam Results:", styles["Heading4"]))
+
+                    exam_data = [
+                        ["Type", "Date", "Correct Words", "Wrong Words", "Score"]
+                    ]
+
                     for exam in exams:
-                        exam_data.append([
-                            exam.type.capitalize(),
-                            exam.timestamp.strftime('%Y-%m-%d'),
-                            str(exam.correct_words),
-                            str(exam.wrong_words),
-                            f"{exam.percentage:.2f}%"
-                        ])
-                    
-                    exam_table = Table(exam_data, colWidths=[1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch])
-                    exam_table.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.darkgreen),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                        ('FONTSIZE', (0, 0), (-1, -1), 8),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-                    ]))
-                    
+                        exam_data.append(
+                            [
+                                exam.type.capitalize(),
+                                exam.timestamp.strftime("%Y-%m-%d"),
+                                str(exam.correct_words),
+                                str(exam.wrong_words),
+                                f"{exam.percentage:.2f}%",
+                            ]
+                        )
+
+                    exam_table = Table(
+                        exam_data,
+                        colWidths=[
+                            1.2 * inch,
+                            1.2 * inch,
+                            1.2 * inch,
+                            1.2 * inch,
+                            1.2 * inch,
+                        ],
+                    )
+                    exam_table.setStyle(
+                        TableStyle(
+                            [
+                                ("BACKGROUND", (0, 0), (-1, 0), colors.darkgreen),
+                                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                                ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                            ]
+                        )
+                    )
+
                     story.append(exam_table)
-                
+
                 # Add page break between levels (except for the last one)
                 if i < len(user_levels) - 1:
                     story.append(PageBreak())
-        
+
         # Build PDF
         doc.build(story)
-        
+
         # Send file
-        filename = f"progress_report_{user.id}_{datetime.utcnow().strftime('%Y%m%d')}.pdf"
-        
+        filename = (
+            f"progress_report_{user.id}_{datetime.utcnow().strftime('%Y%m%d')}.pdf"
+        )
+
         def remove_file(response):
             try:
                 os.unlink(temp_filename)
             except Exception:
                 pass
             return response
-        
+
         response = send_file(
             temp_filename,
-            mimetype='application/pdf',
+            mimetype="application/pdf",
             as_attachment=True,
-            download_name=filename
+            download_name=filename,
         )
-        
+
         # Clean up temp file after sending
-        response.call_on_close(lambda: os.unlink(temp_filename) if os.path.exists(temp_filename) else None)
-        
+        response.call_on_close(
+            lambda: os.unlink(temp_filename) if os.path.exists(temp_filename) else None
+        )
+
         return response
-        
+
     except Exception as e:
         # Clean up temp file on error
         try:
-            if 'temp_filename' in locals() and os.path.exists(temp_filename):
+            if "temp_filename" in locals() and os.path.exists(temp_filename):
                 os.unlink(temp_filename)
         except:
             pass
-        
-        return LocalizationHelper.get_error_response('operation_failed', lang, 500)
+
+        return LocalizationHelper.get_error_response("operation_failed", lang, 500)

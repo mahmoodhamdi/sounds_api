@@ -8,3 +8,6 @@ Flask-Migrate
 pandas
 openpyxl
 reportlab
+matplotlib
+seaborn
+numpy
