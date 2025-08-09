@@ -444,35 +444,109 @@ def create_level():
     )
 
 
-@bp.route("/levels/<int:level_id>", methods=["PUT"])
+@bp.route("/levels/<int:level_id>", methods=["PUT", "PATCH"])
 @admin_required
 def update_level(level_id):
     lang = ValidationHelper.get_language_from_request()
     level = Level.query.get_or_404(level_id)
     data = request.form
 
-    level.name = data.get("name", level.name)
-    level.description = data.get("description", level.description)
-    level.level_number = int(data.get("level_number", level.level_number))
-    level.welcome_video_url = data.get("welcome_video_url", level.welcome_video_url)
-    level.price = float(data.get("price", level.price))
-    level.initial_exam_question = data.get(
-        "initial_exam_question", level.initial_exam_question
-    )
-    level.final_exam_question = data.get(
-        "final_exam_question", level.final_exam_question
-    )
+    # Validate level_number if provided
+    level_number = data.get("level_number")
+    if level_number is not None:
+        if not level_number or not str(level_number).isdigit():
+            return LocalizationHelper.get_error_response(
+                "invalid_number", lang, 400, field="Level number"
+            )
+        level.level_number = int(level_number)
 
-    if "file" in request.files and request.files["file"].filename:
+    # Validate price if provided
+    price = data.get("price")
+    if price is not None:
+        try:
+            level.price = float(price)
+        except (ValueError, TypeError):
+            return LocalizationHelper.get_error_response(
+                "invalid_number", lang, 400, field="Price"
+            )
+
+    # Update other fields if provided
+    if data.get("name"):
+        level.name = data.get("name")
+    
+    if "description" in data:  # Allow empty description
+        level.description = data.get("description", "")
+    
+    if "welcome_video_url" in data:  # Allow empty welcome video URL
+        level.welcome_video_url = data.get("welcome_video_url", "")
+    
+    if "initial_exam_question" in data:  # Allow empty initial exam question
+        level.initial_exam_question = data.get("initial_exam_question", "")
+    
+    if "final_exam_question" in data:  # Allow empty final exam question
+        level.final_exam_question = data.get("final_exam_question", "")
+
+    # Handle file upload if provided
+    if "file" in request.files:
         file = request.files["file"]
-        filename = secure_filename(file.filename)
-        unique_filename = f"{uuid.uuid4()}_{filename}"
-        upload_path = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_filename)
-        os.makedirs(os.path.dirname(upload_path), exist_ok=True)
-        file.save(upload_path)
-        level.image_path = f"/Uploads/levels/{unique_filename}"
+        if file and file.filename != "":
+            # Validate file type (optional - add your validation logic)
+            allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+            if '.' in file.filename:
+                file_ext = file.filename.rsplit('.', 1)[1].lower()
+                if file_ext not in allowed_extensions:
+                    return LocalizationHelper.get_error_response(
+                        "invalid_file_type", lang, 400
+                    )
+            
+            try:
+                filename = secure_filename(file.filename)
+                unique_filename = f"{uuid.uuid4()}_{filename}"
+                upload_path = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_filename)
+                os.makedirs(os.path.dirname(upload_path), exist_ok=True)
+                file.save(upload_path)
+                
+                # Delete old image file if exists (optional)
+                if level.image_path and level.image_path.startswith("/Uploads/levels/"):
+                    old_file_path = os.path.join(
+                        current_app.config["UPLOAD_FOLDER"], 
+                        level.image_path.replace("/Uploads/levels/", "")
+                    )
+                    if os.path.exists(old_file_path):
+                        try:
+                            os.remove(old_file_path)
+                        except OSError:
+                            pass  # File deletion failed, but continue
+                
+                level.image_path = f"/Uploads/levels/{unique_filename}"
+                
+            except Exception as e:
+                return LocalizationHelper.get_error_response(
+                    "operation_failed", lang, 500
+                )
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return LocalizationHelper.get_error_response("database_error", lang, 500)
+
+    # Get videos with questions for response
+    videos_data = []
+    for video in level.videos:
+        questions = (
+            Question.query.filter_by(video_id=video.id)
+            .order_by(Question.order)
+            .all()
+        )
+        video_data = {
+            "id": video.id,
+            "youtube_link": video.youtube_link,
+            "questions": [
+                {"id": q.id, "text": q.text, "order": q.order} for q in questions
+            ],
+        }
+        videos_data.append(video_data)
 
     response_data = {
         "id": level.id,
@@ -485,12 +559,12 @@ def update_level(level_id):
         "initial_exam_question": level.initial_exam_question,
         "final_exam_question": level.final_exam_question,
         "videos_count": len(level.videos),
-        "videos": [self._format_video_data(v) for v in level.videos],
+        "videos": videos_data,
     }
+    
     return LocalizationHelper.get_success_response(
         "level_updated_successfully", response_data, lang, status_code=200
     )
-
 
 def _format_video_data(video):
     """Helper function to format video data with questions"""
