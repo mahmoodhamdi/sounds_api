@@ -845,6 +845,42 @@ def add_video_to_level(level_id):
     video = Video(level_id=level_id, youtube_link=data["youtube_link"])
 
     db.session.add(video)
+    db.session.flush()  # This ensures video.id is available
+
+    # Get all existing UserLevel records for this level
+    user_levels = UserLevel.query.filter_by(level_id=level_id).all()
+
+    # Create UserVideoProgress for each user who has purchased this level
+    for user_level in user_levels:
+        # Check if this is the first video for this user (should be opened by default)
+        existing_progress_count = UserVideoProgress.query.filter_by(
+            user_level_id=user_level.id
+        ).count()
+
+        # If user has no videos yet, or if all existing videos are completed, open this video
+        is_opened = False
+        if existing_progress_count == 0:
+            # First video for this user - should be opened
+            is_opened = True
+        else:
+            # Check if all existing videos are completed
+            completed_videos = UserVideoProgress.query.filter_by(
+                user_level_id=user_level.id,
+                is_completed=True
+            ).count()
+
+            # If all existing videos are completed, open the new video
+            if completed_videos == existing_progress_count:
+                is_opened = True
+
+        video_progress = UserVideoProgress(
+            user_level_id=user_level.id,
+            video_id=video.id,
+            is_opened=is_opened,
+            is_completed=False,
+        )
+        db.session.add(video_progress)
+
     db.session.commit()
 
     response_data = {
@@ -855,7 +891,6 @@ def add_video_to_level(level_id):
     return LocalizationHelper.get_success_response(
         "video_created_successfully", response_data, lang, status_code=201
     )
-
 
 @bp.route("/videos/<int:video_id>", methods=["PUT"])
 @admin_required
