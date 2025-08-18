@@ -473,16 +473,16 @@ def update_level(level_id):
     # Update other fields if provided
     if data.get("name"):
         level.name = data.get("name")
-    
+
     if "description" in data:  # Allow empty description
         level.description = data.get("description", "")
-    
+
     if "welcome_video_url" in data:  # Allow empty welcome video URL
         level.welcome_video_url = data.get("welcome_video_url", "")
-    
+
     if "initial_exam_question" in data:  # Allow empty initial exam question
         level.initial_exam_question = data.get("initial_exam_question", "")
-    
+
     if "final_exam_question" in data:  # Allow empty final exam question
         level.final_exam_question = data.get("final_exam_question", "")
 
@@ -498,18 +498,18 @@ def update_level(level_id):
                     return LocalizationHelper.get_error_response(
                         "invalid_file_type", lang, 400
                     )
-            
+
             try:
                 filename = secure_filename(file.filename)
                 unique_filename = f"{uuid.uuid4()}_{filename}"
                 upload_path = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_filename)
                 os.makedirs(os.path.dirname(upload_path), exist_ok=True)
                 file.save(upload_path)
-                
+
                 # Delete old image file if exists (optional)
                 if level.image_path and level.image_path.startswith("/Uploads/levels/"):
                     old_file_path = os.path.join(
-                        current_app.config["UPLOAD_FOLDER"], 
+                        current_app.config["UPLOAD_FOLDER"],
                         level.image_path.replace("/Uploads/levels/", "")
                     )
                     if os.path.exists(old_file_path):
@@ -517,9 +517,9 @@ def update_level(level_id):
                             os.remove(old_file_path)
                         except OSError:
                             pass  # File deletion failed, but continue
-                
+
                 level.image_path = f"/Uploads/levels/{unique_filename}"
-                
+
             except Exception as e:
                 return LocalizationHelper.get_error_response(
                     "operation_failed", lang, 500
@@ -561,7 +561,7 @@ def update_level(level_id):
         "videos_count": len(level.videos),
         "videos": videos_data,
     }
-    
+
     return LocalizationHelper.get_success_response(
         "level_updated_successfully", response_data, lang, status_code=200
     )
@@ -1936,327 +1936,3 @@ def get_user_statistics(user_id):
     return LocalizationHelper.get_success_response(
         "operation_successful", response_data, lang, status_code=200
     )
-
-@bp.route("/report/pdf", methods=["GET"])
-@client_required
-def get_user_report_pdf():
-    """Generate and download user progress report as PDF"""
-    current_user_id = int(get_jwt_identity())
-    lang = ValidationHelper.get_language_from_request()
-
-    user = User.query.get(current_user_id)
-    if not user:
-        return LocalizationHelper.get_error_response("user_not_found", lang, 404)
-
-    try:
-        # Create temporary file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        temp_filename = temp_file.name
-        temp_file.close()
-
-        # Create PDF document
-        doc = SimpleDocTemplate(temp_filename, pagesize=A4)
-        styles = getSampleStyleSheet()
-        story = []
-
-        # Custom styles
-        title_style = ParagraphStyle(
-            "CustomTitle",
-            parent=styles["Heading1"],
-            fontSize=24,
-            spaceAfter=30,
-            alignment=TA_CENTER,
-            textColor=colors.darkblue,
-        )
-
-        heading_style = ParagraphStyle(
-            "CustomHeading",
-            parent=styles["Heading2"],
-            fontSize=16,
-            spaceAfter=12,
-            textColor=colors.darkblue,
-        )
-
-        subheading_style = ParagraphStyle(
-            "CustomSubHeading",
-            parent=styles["Heading3"],
-            fontSize=14,
-            spaceAfter=10,
-            textColor=colors.blue,
-        )
-
-        # Title
-        story.append(Paragraph("User Progress Report", title_style))
-        story.append(Spacer(1, 20))
-
-        # Report info
-        report_info = (
-            f"Generated on {datetime.utcnow().strftime('%B %d, %Y at %H:%M UTC')}"
-        )
-        story.append(Paragraph(report_info, styles["Normal"]))
-        story.append(Spacer(1, 30))
-
-        # User Information Section
-        story.append(Paragraph("User Information", heading_style))
-
-        user_data = [
-            ["Name", user.name],
-            ["Email", user.email],
-            ["Phone", user.phone or "Not provided"],
-            ["User ID", str(user.id)],
-            ["Role", user.role.capitalize()],
-        ]
-
-        user_table = Table(user_data, colWidths=[2 * inch, 4 * inch])
-        user_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (0, -1), colors.lightblue),
-                    ("TEXTCOLOR", (0, 0), (0, -1), colors.whitesmoke),
-                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 10),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
-                    ("BACKGROUND", (1, 0), (1, -1), colors.beige),
-                    ("GRID", (0, 0), (-1, -1), 1, colors.black),
-                ]
-            )
-        )
-
-        story.append(user_table)
-        story.append(Spacer(1, 30))
-
-        # Levels Progress Section
-        story.append(Paragraph("Levels Progress", heading_style))
-
-        user_levels = UserLevel.query.filter_by(user_id=current_user_id).all()
-
-        if not user_levels:
-            story.append(Paragraph("No levels enrolled.", styles["Normal"]))
-        else:
-            for i, user_level in enumerate(user_levels):
-                level = user_level.level
-
-                # Level header
-                level_title = f"Level {level.level_number}: {level.name}"
-                story.append(Paragraph(level_title, subheading_style))
-
-                # Level info table
-                level_info = [
-                    ["Description", level.description or "No description"],
-                    [
-                        "Status",
-                        "Completed" if user_level.is_completed else "In Progress",
-                    ],
-                    [
-                        "Can Take Final Exam",
-                        "Yes" if user_level.can_take_final_exam else "No",
-                    ],
-                    [
-                        "Initial Exam Score",
-                        (
-                            f"{user_level.initial_exam_score:.2f}%"
-                            if user_level.initial_exam_score is not None
-                            else "Not taken"
-                        ),
-                    ],
-                    [
-                        "Final Exam Score",
-                        (
-                            f"{user_level.final_exam_score:.2f}%"
-                            if user_level.final_exam_score is not None
-                            else "Not taken"
-                        ),
-                    ],
-                    [
-                        "Score Improvement",
-                        (
-                            f"{user_level.score_difference:.2f}%"
-                            if user_level.score_difference is not None
-                            else "N/A"
-                        ),
-                    ],
-                ]
-
-                level_table = Table(level_info, colWidths=[2 * inch, 4 * inch])
-                level_table.setStyle(
-                    TableStyle(
-                        [
-                            ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
-                            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-                            ("FONTSIZE", (0, 0), (-1, -1), 9),
-                            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                            ("GRID", (0, 0), (-1, -1), 1, colors.black),
-                        ]
-                    )
-                )
-
-                story.append(level_table)
-                story.append(Spacer(1, 15))
-
-                # Videos and Questions Summary
-                videos_progress = UserVideoProgress.query.filter_by(
-                    user_level_id=user_level.id
-                ).all()
-
-                if videos_progress:
-                    story.append(Paragraph("Videos Progress:", styles["Heading4"]))
-
-                    video_data = [
-                        ["Video ID", "Status", "Questions Answered", "Avg Score"]
-                    ]
-
-                    for progress in videos_progress:
-                        video = Video.query.get(progress.video_id)
-                        questions = Question.query.filter_by(video_id=video.id).all()
-
-                        answered_questions = 0
-                        total_score = 0
-
-                        for question in questions:
-                            answer = UserQuestionAnswer.query.filter_by(
-                                user_id=current_user_id, question_id=question.id
-                            ).first()
-                            if answer:
-                                answered_questions += 1
-                                total_score += answer.percentage
-
-                        avg_score = (
-                            (total_score / answered_questions)
-                            if answered_questions > 0
-                            else 0
-                        )
-                        status = (
-                            "Completed"
-                            if progress.is_completed
-                            else ("Opened" if progress.is_opened else "Locked")
-                        )
-
-                        video_data.append(
-                            [
-                                str(video.id),
-                                status,
-                                f"{answered_questions}/{len(questions)}",
-                                (
-                                    f"{avg_score:.1f}%"
-                                    if answered_questions > 0
-                                    else "N/A"
-                                ),
-                            ]
-                        )
-
-                    video_table = Table(
-                        video_data,
-                        colWidths=[1 * inch, 1.5 * inch, 1.5 * inch, 1.5 * inch],
-                    )
-                    video_table.setStyle(
-                        TableStyle(
-                            [
-                                ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
-                                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-                                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                                ("FONTSIZE", (0, 0), (-1, -1), 8),
-                                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                                ("GRID", (0, 0), (-1, -1), 1, colors.black),
-                            ]
-                        )
-                    )
-
-                    story.append(video_table)
-                    story.append(Spacer(1, 20))
-
-                # Exam Results for this level
-                exams = ExamResult.query.filter_by(
-                    user_id=current_user_id, level_id=level.id
-                ).all()
-
-                if exams:
-                    story.append(Paragraph("Exam Results:", styles["Heading4"]))
-
-                    exam_data = [
-                        ["Type", "Date", "Correct Words", "Wrong Words", "Score"]
-                    ]
-
-                    for exam in exams:
-                        exam_data.append(
-                            [
-                                exam.type.capitalize(),
-                                exam.timestamp.strftime("%Y-%m-%d"),
-                                str(exam.correct_words),
-                                str(exam.wrong_words),
-                                f"{exam.percentage:.2f}%",
-                            ]
-                        )
-
-                    exam_table = Table(
-                        exam_data,
-                        colWidths=[
-                            1.2 * inch,
-                            1.2 * inch,
-                            1.2 * inch,
-                            1.2 * inch,
-                            1.2 * inch,
-                        ],
-                    )
-                    exam_table.setStyle(
-                        TableStyle(
-                            [
-                                ("BACKGROUND", (0, 0), (-1, 0), colors.darkgreen),
-                                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-                                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                                ("FONTSIZE", (0, 0), (-1, -1), 8),
-                                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                                ("GRID", (0, 0), (-1, -1), 1, colors.black),
-                            ]
-                        )
-                    )
-
-                    story.append(exam_table)
-
-                # Add page break between levels (except for the last one)
-                if i < len(user_levels) - 1:
-                    story.append(PageBreak())
-
-        # Build PDF
-        doc.build(story)
-
-        # Send file
-        filename = (
-            f"progress_report_{user.id}_{datetime.utcnow().strftime('%Y%m%d')}.pdf"
-        )
-
-        def remove_file(response):
-            try:
-                os.unlink(temp_filename)
-            except Exception:
-                pass
-            return response
-
-        response = send_file(
-            temp_filename,
-            mimetype="application/pdf",
-            as_attachment=True,
-            download_name=filename,
-        )
-
-        # Clean up temp file after sending
-        response.call_on_close(
-            lambda: os.unlink(temp_filename) if os.path.exists(temp_filename) else None
-        )
-
-        return response
-
-    except Exception as e:
-        # Clean up temp file on error
-        try:
-            if "temp_filename" in locals() and os.path.exists(temp_filename):
-                os.unlink(temp_filename)
-        except:
-            pass
-
-        return LocalizationHelper.get_error_response("operation_failed", lang, 500)
