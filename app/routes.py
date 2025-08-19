@@ -601,11 +601,22 @@ def delete_level(level_id):
 
 
 @bp.route("/levels", methods=["GET"])
-@admin_or_client_required
 def get_levels():
-    current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
-    user = User.query.get(current_user_id)
+    
+    # Check if user is authenticated (optional)
+    current_user_id = None
+    user = None
+    try:
+        from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity
+        verify_jwt_in_request(optional=True)
+        current_user_id = get_jwt_identity()
+        if current_user_id:
+            current_user_id = int(current_user_id)
+            user = User.query.get(current_user_id)
+    except:
+        # User is not authenticated (guest access)
+        pass
 
     min_price = request.args.get("min_price", type=float)
     max_price = request.args.get("max_price", type=float)
@@ -643,77 +654,83 @@ def get_levels():
             "can_take_final_exam": False,
         }
 
-        user_level = UserLevel.query.filter_by(
-            user_id=current_user_id, level_id=level.id
-        ).first()
-        if user_level:
-            level_data["is_completed"] = user_level.is_completed
-            level_data["can_take_final_exam"] = user_level.can_take_final_exam
+        # If user is authenticated, provide personalized data
+        if current_user_id and user:
+            user_level = UserLevel.query.filter_by(
+                user_id=current_user_id, level_id=level.id
+            ).first()
+            if user_level:
+                level_data["is_completed"] = user_level.is_completed
+                level_data["can_take_final_exam"] = user_level.can_take_final_exam
 
-            for video in level.videos:
-                video_progress = UserVideoProgress.query.filter_by(
-                    user_level_id=user_level.id, video_id=video.id
-                ).first()
+                for video in level.videos:
+                    video_progress = UserVideoProgress.query.filter_by(
+                        user_level_id=user_level.id, video_id=video.id
+                    ).first()
 
-                questions = (
-                    Question.query.filter_by(video_id=video.id)
-                    .order_by(Question.order)
-                    .all()
-                )
-                questions_data = []
+                    questions = (
+                        Question.query.filter_by(video_id=video.id)
+                        .order_by(Question.order)
+                        .all()
+                    )
+                    questions_data = []
 
-                if user.role == "admin" or (
-                    video_progress and video_progress.is_opened
-                ):
-                    for question in questions:
-                        question_data = {
-                            "id": question.id,
-                            "text": question.text,
-                            "order": question.order,
-                        }
-                        if user.role == "client":
-                            user_answer = UserQuestionAnswer.query.filter_by(
-                                user_id=current_user_id, question_id=question.id
-                            ).first()
-                            if user_answer:
-                                question_data["user_answer"] = {
-                                    "correct_words": user_answer.correct_words,
-                                    "wrong_words": user_answer.wrong_words,
-                                    "percentage": user_answer.percentage,
-                                    "submitted_at": user_answer.submitted_at.isoformat(),
-                                }
-                        questions_data.append(question_data)
+                    if user.role == "admin" or (
+                        video_progress and video_progress.is_opened
+                    ):
+                        for question in questions:
+                            question_data = {
+                                "id": question.id,
+                                "text": question.text,
+                                "order": question.order,
+                            }
+                            if user.role == "client":
+                                user_answer = UserQuestionAnswer.query.filter_by(
+                                    user_id=current_user_id, question_id=question.id
+                                ).first()
+                                if user_answer:
+                                    question_data["user_answer"] = {
+                                        "correct_words": user_answer.correct_words,
+                                        "wrong_words": user_answer.wrong_words,
+                                        "percentage": user_answer.percentage,
+                                        "submitted_at": user_answer.submitted_at.isoformat(),
+                                    }
+                            questions_data.append(question_data)
 
-                video_data = {
-                    "id": video.id,
-                    "youtube_link": (
-                        video.youtube_link
-                        if user.role == "admin"
-                        else (
+                    video_data = {
+                        "id": video.id,
+                        "youtube_link": (
                             video.youtube_link
-                            if video_progress and video_progress.is_opened
-                            else ""
-                        )
-                    ),
-                    "questions": questions_data,
-                    "is_opened": video_progress.is_opened if video_progress else False,
-                }
-                level_data["videos"].append(video_data)
+                            if user.role == "admin"
+                            else (
+                                video.youtube_link
+                                if video_progress and video_progress.is_opened
+                                else ""
+                            )
+                        ),
+                        "questions": questions_data,
+                        "is_opened": video_progress.is_opened if video_progress else False,
+                    }
+                    level_data["videos"].append(video_data)
+            else:
+                # User is authenticated but hasn't purchased this level
+                level_data["videos"] = [
+                    {"id": v.id, "youtube_link": "", "questions": []} for v in level.videos
+                ]
+
+            if user.role == "admin":
+                level_data["user_count"] = len(level.user_levels)
         else:
+            # Guest user - provide basic video structure without content
             level_data["videos"] = [
                 {"id": v.id, "youtube_link": "", "questions": []} for v in level.videos
             ]
-
-        if user.role == "admin":
-            level_data["user_count"] = len(level.user_levels)
 
         result.append(level_data)
 
     return LocalizationHelper.get_success_response(
         "operation_successful", {"levels": result}, lang, status_code=200
     )
-
-
 @bp.route("/admin/levels", methods=["GET"])
 @admin_required
 def admin_get_all_levels():
