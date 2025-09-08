@@ -1504,7 +1504,6 @@ def get_all_exam_results():
 
 
 # Report Route
-# Updated Report Route
 @bp.route("/report", methods=["GET"])
 @client_required
 def get_user_report():
@@ -1513,8 +1512,6 @@ def get_user_report():
     user = User.query.get(current_user_id)
     if not user:
         return LocalizationHelper.get_error_response("user_not_found", lang, 404)
-
-    output_format = request.args.get("format", "markdown").lower()
 
     user_data = {
         "id": user.id,
@@ -1639,80 +1636,10 @@ def get_user_report():
         }
         levels_data.append(level_data)
 
-    if output_format == "json":
-        report = {"user": user_data, "levels": levels_data}
-        return LocalizationHelper.get_success_response(
-            "operation_successful", report, lang, status_code=200
-        )
-    else:
-        markdown_content = f"""
-# User Progress Report
-
-Generated on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
-
-## User Information
-
-- *Name*: {user_data['name']}
-- *Email*: {user_data['email']}
-- *Phone*: {user_data['phone']}
-- *User ID*: {user_data['id']}
-- *Role*: {user_data['role'].capitalize()}
-- *Picture*: {user_data['picture']}
-
-## Levels Progress
-
-{'*No levels enrolled.*' if not levels_data else ''}
-
-"""
-        for level in levels_data:
-            markdown_content += f"""
-### Level: {level['level_name']} (ID: {level['level_id']})
-
-- *Description*: {level['level_description']}
-- *Level Number*: {level['level_number']}
-- *Status*: {'Completed' if level['is_completed'] else 'In Progress'}
-- *Can Take Final Exam*: {'Yes' if level['can_take_final_exam'] else 'No'}
-- *Initial Exam Score*: {round(level['initial_exam_score'], 2) if level['initial_exam_score'] is not None else 'Not taken'}
-- *Final Exam Score*: {round(level['final_exam_score'], 2) if level['final_exam_score'] is not None else 'Not taken'}
-- *Score Difference*: {round(level['score_difference'], 2) if level['score_difference'] is not None else 'N/A'}
-
-#### Videos and Questions
-
-"""
-            for video in level["videos"]:
-                markdown_content += f"""
-##### Video ID: {video['video_id']}
-- *YouTube Link*: {video['youtube_link']}
-- *Opened*: {'Yes' if video['is_opened'] else 'No'}
-- *Completed*: {'Yes' if video['is_completed'] else 'No'}
-
-*Questions:*
-
-| Question ID | Text | Order | Correct Words | Wrong Words | Percentage | Correct Words List | Wrong Words List | Submitted At |
-|-------------|------|-------|---------------|-------------|------------|--------------------|------------------|--------------|
-"""
-                for question in video["questions"]:
-                    markdown_content += f"""
-| {question['question_id']} | {question['question_text'][:50]}... | {question['question_order']} | {question['correct_words'] if question['correct_words'] is not None else 'N/A'} | {question['wrong_words'] if question['wrong_words'] is not None else 'N/A'} | {round(question['percentage'], 2) if question['percentage'] is not None else 'N/A'} | {', '.join(question['correct_words_list']) if question['correct_words_list'] else 'None'} | {', '.join(question['wrong_words_list']) if question['wrong_words_list'] else 'None'} | {question['submitted_at'] if question['submitted_at'] else 'Not submitted'} |
-"""
-
-            markdown_content += f"""
-#### Exams
-
-| Type | Timestamp | Correct Words | Wrong Words | Percentage | Correct Words List | Wrong Words List |
-|------|-----------|---------------|-------------|------------|--------------------|------------------|
-"""
-            for exam in level["exams"]:
-                markdown_content += f"""
-| {exam['type'].capitalize()} | {exam['timestamp']} | {exam['correct_words']} | {exam['wrong_words']} | {round(exam['percentage'], 2)} | {', '.join(exam['correct_words_list']) if exam['correct_words_list'] else 'None'} | {', '.join(exam['wrong_words_list']) if exam['wrong_words_list'] else 'None'} |
-"""
-
-        response = make_response(markdown_content)
-        response.headers["Content-Type"] = "text/markdown"
-        response.headers["Content-Disposition"] = (
-            f"inline; filename=user_report_{user.id}.md"
-        )
-        return response
+    report = {"user": user_data, "levels": levels_data}
+    return LocalizationHelper.get_success_response(
+        "operation_successful", report, lang, status_code=200
+    )
 
 
 @bp.route("/users/<int:user_id>/levels", methods=["GET"])
