@@ -92,11 +92,8 @@ class UserQuestionAnswer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     question_id = db.Column(db.Integer, db.ForeignKey('question.id'), nullable=False)
-    correct_words = db.Column(db.Integer, nullable=False, default=0)
-    wrong_words = db.Column(db.Integer, nullable=False, default=0)
+    speechace_response = db.Column(db.Text, nullable=True) 
     percentage = db.Column(db.Float, nullable=False, default=0.0)
-    correct_words_list = db.Column(db.Text, nullable=True)
-    wrong_words_list = db.Column(db.Text, nullable=True)
     submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Add unique constraint on user_id and question_id
@@ -114,13 +111,11 @@ class ExamResult(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     level_id = db.Column(db.Integer, db.ForeignKey('level.id'), nullable=False)
-    correct_words = db.Column(db.Integer, nullable=False)
-    wrong_words = db.Column(db.Integer, nullable=False)
+    speechace_response = db.Column(db.Text, nullable=True)
     percentage = db.Column(db.Float, nullable=False)
     type = db.Column(db.String(20), nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    correct_words_list = db.Column(db.Text, nullable=True)
-    wrong_words_list = db.Column(db.Text, nullable=True)
+    
 
     def _repr_(self):
         return f'ExamResult(User: {self.user_id}, Level: {self.level_id}, Type: {self.type}, Score: {self.percentage})'

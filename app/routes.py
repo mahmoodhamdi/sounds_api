@@ -690,10 +690,19 @@ def get_levels():
                                 ).first()
                                 if user_answer:
                                     question_data["user_answer"] = {
-                                        "correct_words": user_answer.correct_words,
-                                        "wrong_words": user_answer.wrong_words,
                                         "percentage": user_answer.percentage,
+                                        "speechace_response": (
+                                            json.loads(user_answer.speechace_response)
+                                            if user_answer.speechace_response
+                                            else {}
+                                        ),
                                         "submitted_at": user_answer.submitted_at.isoformat(),
+                                    }
+                                else:
+                                    question_data["user_answer"] = {
+                                        "percentage": None,
+                                        "speechace_response": {},
+                                        "submitted_at": None,
                                     }
                             questions_data.append(question_data)
 
@@ -731,6 +740,7 @@ def get_levels():
     return LocalizationHelper.get_success_response(
         "operation_successful", {"levels": result}, lang, status_code=200
     )
+
 @bp.route("/admin/levels", methods=["GET"])
 @admin_required
 def admin_get_all_levels():
@@ -827,10 +837,19 @@ def get_level(level_id):
                 ).first()
                 if user_answer:
                     question_data["user_answer"] = {
-                        "correct_words": user_answer.correct_words,
-                        "wrong_words": user_answer.wrong_words,
                         "percentage": user_answer.percentage,
+                        "speechace_response": (
+                            json.loads(user_answer.speechace_response)
+                            if user_answer.speechace_response
+                            else {}
+                        ),
                         "submitted_at": user_answer.submitted_at.isoformat(),
+                    }
+                else:
+                    question_data["user_answer"] = {
+                        "percentage": None,
+                        "speechace_response": {},
+                        "submitted_at": None,
                     }
                 questions_data.append(question_data)
 
@@ -1097,27 +1116,29 @@ def get_video_questions(video_id):
             "order": question.order,
             "created_at": question.created_at.isoformat(),
         }
+
         if user.role == "client":
             user_answer = UserQuestionAnswer.query.filter_by(
-                user_id=current_user_id, question_id=question.id
+                user_id=current_user_id,
+                question_id=question.id
             ).first()
+
             if user_answer:
                 question_data["user_answer"] = {
-                    "correct_words": user_answer.correct_words,
-                    "wrong_words": user_answer.wrong_words,
                     "percentage": user_answer.percentage,
-                    "correct_words_list": (
-                        json.loads(user_answer.correct_words_list)
-                        if user_answer.correct_words_list
-                        else []
-                    ),
-                    "wrong_words_list": (
-                        json.loads(user_answer.wrong_words_list)
-                        if user_answer.wrong_words_list
-                        else []
+                    "speechace_response": (
+                        json.loads(user_answer.speechace_response)
+                        if user_answer.speechace_response else {}
                     ),
                     "submitted_at": user_answer.submitted_at.isoformat(),
                 }
+            else:
+                question_data["user_answer"] = {
+                    "percentage": None,
+                    "speechace_response": {},
+                    "submitted_at": None,
+                }
+
         result.append(question_data)
 
     return LocalizationHelper.get_success_response(
@@ -1126,6 +1147,18 @@ def get_video_questions(video_id):
 
 
 # Question Answer Submission Routes
+# Add this helper function near the top of routes.py
+def extract_pronunciation_score(speechace_response):
+    """
+    Extract the pronunciation score from the SpeechAce response.
+    Returns 0.0 if the structure is invalid.
+    """
+    try:
+        return float(speechace_response.get('text_score', {}).get('speechace_score', {}).get('pronunciation', 0.0))
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+
+# Update submit_question_answer
 @bp.route("/questions/<int:question_id>/submit", methods=["POST"])
 @client_required
 def submit_question_answer(question_id):
@@ -1134,15 +1167,13 @@ def submit_question_answer(question_id):
     question = Question.query.get_or_404(question_id)
     data = request.get_json()
 
-    if "correct_words" not in data or "wrong_words" not in data:
+    if "speechace_response" not in data:
         return LocalizationHelper.get_error_response(
-            "required_field", lang, 400, field="correct_words and wrong_words"
+            "required_field", lang, 400, field="speechace_response"
         )
 
-    correct_words = data["correct_words"]
-    wrong_words = data["wrong_words"]
-    total_words = correct_words + wrong_words
-    percentage = (correct_words / total_words * 100) if total_words > 0 else 0
+    speechace_response = data["speechace_response"]
+    percentage = extract_pronunciation_score(speechace_response)
 
     user_level = (
         UserLevel.query.join(Level)
@@ -1166,24 +1197,17 @@ def submit_question_answer(question_id):
     ).first()
 
     if existing_answer:
-        existing_answer.correct_words = correct_words
-        existing_answer.wrong_words = wrong_words
+        existing_answer.speechace_response = json.dumps(speechace_response)
         existing_answer.percentage = percentage
-        existing_answer.correct_words_list = json.dumps(
-            data.get("correct_words_list", [])
-        )
-        existing_answer.wrong_words_list = json.dumps(data.get("wrong_words_list", []))
         existing_answer.submitted_at = datetime.utcnow()
         answer = existing_answer
     else:
         answer = UserQuestionAnswer(
             user_id=current_user_id,
             question_id=question_id,
-            correct_words=correct_words,
-            wrong_words=wrong_words,
+            speechace_response=json.dumps(speechace_response),
             percentage=percentage,
-            correct_words_list=json.dumps(data.get("correct_words_list", [])),
-            wrong_words_list=json.dumps(data.get("wrong_words_list", [])),
+            submitted_at=datetime.utcnow()
         )
         db.session.add(answer)
 
@@ -1193,21 +1217,110 @@ def submit_question_answer(question_id):
         "id": answer.id,
         "question_id": question_id,
         "question_text": question.text,
-        "correct_words": answer.correct_words,
-        "wrong_words": answer.wrong_words,
         "percentage": answer.percentage,
-        "correct_words_list": (
-            json.loads(answer.correct_words_list) if answer.correct_words_list else []
-        ),
-        "wrong_words_list": (
-            json.loads(answer.wrong_words_list) if answer.wrong_words_list else []
-        ),
+        "speechace_response": json.loads(answer.speechace_response) if answer.speechace_response else {},
         "submitted_at": answer.submitted_at.isoformat(),
     }
     return LocalizationHelper.get_success_response(
         "answer_submitted_successfully", response_data, lang, status_code=200
     )
 
+# Update submit_initial_exam
+@bp.route("/exams/<int:level_id>/initial", methods=["POST"])
+@client_required
+def submit_initial_exam(level_id):
+    current_user_id = int(get_jwt_identity())
+    lang = ValidationHelper.get_language_from_request()
+    data = request.get_json()
+
+    if "speechace_response" not in data:
+        return LocalizationHelper.get_error_response(
+            "required_field", lang, 400, field="speechace_response"
+        )
+
+    speechace_response = data["speechace_response"]
+    percentage = extract_pronunciation_score(speechace_response)
+
+    user_level = UserLevel.query.filter_by(
+        user_id=current_user_id, level_id=level_id
+    ).first()
+    if not user_level:
+        return LocalizationHelper.get_error_response("level_not_purchased", lang, 400)
+
+    exam_result = ExamResult(
+        user_id=current_user_id,
+        level_id=level_id,
+        speechace_response=json.dumps(speechace_response),
+        percentage=percentage,
+        type="initial",
+    )
+
+    user_level.initial_exam_score = percentage
+
+    db.session.add(exam_result)
+    db.session.commit()
+
+    response_data = {
+        "user_id": current_user_id,
+        "level_id": level_id,
+        "percentage": percentage,
+        "type": "initial",
+    }
+    return LocalizationHelper.get_success_response(
+        "initial_exam_submitted", response_data, lang, status_code=201
+    )
+
+# Update submit_final_exam
+@bp.route("/exams/<int:level_id>/final", methods=["POST"])
+@client_required
+def submit_final_exam(level_id):
+    current_user_id = int(get_jwt_identity())
+    lang = ValidationHelper.get_language_from_request()
+    data = request.get_json()
+
+    if "speechace_response" not in data:
+        return LocalizationHelper.get_error_response(
+            "required_field", lang, 400, field="speechace_response"
+        )
+
+    speechace_response = data["speechace_response"]
+    percentage = extract_pronunciation_score(speechace_response)
+
+    user_level = UserLevel.query.filter_by(
+        user_id=current_user_id, level_id=level_id
+    ).first()
+    if not user_level:
+        return LocalizationHelper.get_error_response("level_not_purchased", lang, 400)
+
+    if not user_level.can_take_final_exam:
+        return LocalizationHelper.get_error_response("exam_not_available", lang, 400)
+
+    exam_result = ExamResult(
+        user_id=current_user_id,
+        level_id=level_id,
+        speechace_response=json.dumps(speechace_response),
+        percentage=percentage,
+        type="final",
+    )
+
+    user_level.final_exam_score = percentage
+    if user_level.initial_exam_score is not None:
+        user_level.score_difference = percentage - user_level.initial_exam_score
+
+    user_level.is_completed = True
+
+    db.session.add(exam_result)
+    db.session.commit()
+
+    response_data = {
+        "user_id": current_user_id,
+        "level_id": level_id,
+        "percentage": percentage,
+        "type": "final",
+    }
+    return LocalizationHelper.get_success_response(
+        "final_exam_submitted", response_data, lang, status_code=201
+    )
 
 @bp.route("/users/<int:user_id>/questions/<int:question_id>/answer", methods=["GET"])
 @client_required
@@ -1232,17 +1345,14 @@ def get_user_question_answer(user_id, question_id):
         "id": answer.id,
         "question_id": question_id,
         "question_text": question.text if question else "",
-        "correct_words": answer.correct_words,
-        "wrong_words": answer.wrong_words,
         "percentage": answer.percentage,
-        "correct_words_list": (
-            json.loads(answer.correct_words_list) if answer.correct_words_list else []
-        ),
-        "wrong_words_list": (
-            json.loads(answer.wrong_words_list) if answer.wrong_words_list else []
+        "speechace_response": (
+            json.loads(answer.speechace_response)
+            if answer.speechace_response else {}
         ),
         "submitted_at": answer.submitted_at.isoformat(),
     }
+
     return LocalizationHelper.get_success_response(
         "operation_successful", response_data, lang, status_code=200
     )
@@ -1260,16 +1370,10 @@ def get_question_answers(question_id):
             "id": answer.id,
             "user_id": answer.user_id,
             "user_name": answer.user.name if answer.user else "",
-            "correct_words": answer.correct_words,
-            "wrong_words": answer.wrong_words,
             "percentage": answer.percentage,
-            "correct_words_list": (
-                json.loads(answer.correct_words_list)
-                if answer.correct_words_list
-                else []
-            ),
-            "wrong_words_list": (
-                json.loads(answer.wrong_words_list) if answer.wrong_words_list else []
+            "speechace_response": (
+                json.loads(answer.speechace_response)
+                if answer.speechace_response else {}
             ),
             "submitted_at": answer.submitted_at.isoformat(),
         }
@@ -1281,6 +1385,7 @@ def get_question_answers(question_id):
         "question_text": question.text,
         "answers": result,
     }
+
     return LocalizationHelper.get_success_response(
         "operation_successful", response_data, lang, status_code=200
     )
@@ -1351,102 +1456,6 @@ def complete_video(user_id, level_id, video_id):
 
 
 # Exam Routes
-@bp.route("/exams/<int:level_id>/initial", methods=["POST"])
-@client_required
-def submit_initial_exam(level_id):
-    current_user_id = int(get_jwt_identity())
-    lang = ValidationHelper.get_language_from_request()
-    data = request.get_json()
-
-    user_level = UserLevel.query.filter_by(
-        user_id=current_user_id, level_id=level_id
-    ).first()
-    if not user_level:
-        return LocalizationHelper.get_error_response("level_not_purchased", lang, 400)
-
-    total_words = data["correct_words"] + data["wrong_words"]
-    percentage = (data["correct_words"] / total_words * 100) if total_words > 0 else 0
-
-    exam_result = ExamResult(
-        user_id=current_user_id,
-        level_id=level_id,
-        correct_words=data["correct_words"],
-        wrong_words=data["wrong_words"],
-        percentage=percentage,
-        type="initial",
-        correct_words_list=json.dumps(data.get("correct_words_list", [])),
-        wrong_words_list=json.dumps(data.get("wrong_words_list", [])),
-    )
-
-    user_level.initial_exam_score = percentage
-
-    db.session.add(exam_result)
-    db.session.commit()
-
-    response_data = {
-        "user_id": current_user_id,
-        "level_id": level_id,
-        "correct_words": data["correct_words"],
-        "wrong_words": data["wrong_words"],
-        "percentage": percentage,
-        "type": "initial",
-    }
-    return LocalizationHelper.get_success_response(
-        "initial_exam_submitted", response_data, lang, status_code=201
-    )
-
-
-@bp.route("/exams/<int:level_id>/final", methods=["POST"])
-@client_required
-def submit_final_exam(level_id):
-    current_user_id = int(get_jwt_identity())
-    lang = ValidationHelper.get_language_from_request()
-    data = request.get_json()
-
-    user_level = UserLevel.query.filter_by(
-        user_id=current_user_id, level_id=level_id
-    ).first()
-    if not user_level:
-        return LocalizationHelper.get_error_response("level_not_purchased", lang, 400)
-
-    if not user_level.can_take_final_exam:
-        return LocalizationHelper.get_error_response("exam_not_available", lang, 400)
-
-    total_words = data["correct_words"] + data["wrong_words"]
-    percentage = (data["correct_words"] / total_words * 100) if total_words > 0 else 0
-
-    exam_result = ExamResult(
-        user_id=current_user_id,
-        level_id=level_id,
-        correct_words=data["correct_words"],
-        wrong_words=data["wrong_words"],
-        percentage=percentage,
-        type="final",
-        correct_words_list=json.dumps(data.get("correct_words_list", [])),
-        wrong_words_list=json.dumps(data.get("wrong_words_list", [])),
-    )
-
-    user_level.final_exam_score = percentage
-    if user_level.initial_exam_score is not None:
-        user_level.score_difference = percentage - user_level.initial_exam_score
-
-    user_level.is_completed = True
-
-    db.session.add(exam_result)
-    db.session.commit()
-
-    response_data = {
-        "user_id": current_user_id,
-        "level_id": level_id,
-        "correct_words": data["correct_words"],
-        "wrong_words": data["wrong_words"],
-        "percentage": percentage,
-        "type": "final",
-    }
-    return LocalizationHelper.get_success_response(
-        "final_exam_submitted", response_data, lang, status_code=201
-    )
-
 
 @bp.route("/exams/<int:level_id>/user/<int:user_id>", methods=["GET"])
 @client_required
@@ -1464,10 +1473,9 @@ def get_user_exam_results(level_id, user_id):
         {
             "user_id": exam.user_id,
             "level_id": exam.level_id,
-            "correct_words": exam.correct_words,
-            "wrong_words": exam.wrong_words,
             "percentage": exam.percentage,
             "type": exam.type,
+            "speechace_response": json.loads(exam.speechace_response) if exam.speechace_response else {},
             "timestamp": exam.timestamp.isoformat(),
         }
         for exam in exam_results
@@ -1476,33 +1484,6 @@ def get_user_exam_results(level_id, user_id):
     return LocalizationHelper.get_success_response(
         "operation_successful", {"exam_results": results}, lang, status_code=200
     )
-
-
-@bp.route("/admin/exams", methods=["GET"])
-@admin_required
-def get_all_exam_results():
-    lang = ValidationHelper.get_language_from_request()
-    exam_results = ExamResult.query.all()
-    result = [
-        {
-            "id": exam.id,
-            "user_id": exam.user_id,
-            "user_name": exam.user.name if exam.user else "",
-            "level_id": exam.level_id,
-            "level_name": exam.level.name if exam.level else "",
-            "correct_words": exam.correct_words,
-            "wrong_words": exam.wrong_words,
-            "percentage": exam.percentage,
-            "type": exam.type,
-            "timestamp": exam.timestamp.isoformat(),
-        }
-        for exam in exam_results
-    ]
-    return LocalizationHelper.get_success_response(
-        "operation_successful", {"exam_results": result}, lang, status_code=200
-    )
-
-
 # Report Route
 @bp.route("/report", methods=["GET"])
 @client_required
@@ -1555,18 +1536,11 @@ def get_user_report():
                 if user_answer:
                     question_data.update(
                         {
-                            "correct_words": user_answer.correct_words,
-                            "wrong_words": user_answer.wrong_words,
                             "percentage": user_answer.percentage,
-                            "correct_words_list": (
-                                json.loads(user_answer.correct_words_list)
-                                if user_answer.correct_words_list
-                                else []
-                            ),
-                            "wrong_words_list": (
-                                json.loads(user_answer.wrong_words_list)
-                                if user_answer.wrong_words_list
-                                else []
+                            "speechace_response": (
+                                json.loads(user_answer.speechace_response)
+                                if user_answer.speechace_response
+                                else {}
                             ),
                             "submitted_at": user_answer.submitted_at.isoformat(),
                         }
@@ -1574,11 +1548,8 @@ def get_user_report():
                 else:
                     question_data.update(
                         {
-                            "correct_words": None,
-                            "wrong_words": None,
                             "percentage": None,
-                            "correct_words_list": [],
-                            "wrong_words_list": [],
+                            "speechace_response": {},
                             "submitted_at": None,
                         }
                     )
@@ -1604,18 +1575,11 @@ def get_user_report():
             exams_data.append(
                 {
                     "type": exam.type,
-                    "correct_words": exam.correct_words,
-                    "wrong_words": exam.wrong_words,
                     "percentage": exam.percentage,
-                    "correct_words_list": (
-                        json.loads(exam.correct_words_list)
-                        if exam.correct_words_list
-                        else []
-                    ),
-                    "wrong_words_list": (
-                        json.loads(exam.wrong_words_list)
-                        if exam.wrong_words_list
-                        else []
+                    "speechace_response": (
+                        json.loads(exam.speechace_response)
+                        if exam.speechace_response
+                        else {}
                     ),
                     "timestamp": exam.timestamp.isoformat(),
                 }
@@ -1641,7 +1605,7 @@ def get_user_report():
         "operation_successful", report, lang, status_code=200
     )
 
-
+# Get User Levels Route
 @bp.route("/users/<int:user_id>/levels", methods=["GET"])
 @client_required
 def get_user_levels(user_id):
@@ -1688,10 +1652,19 @@ def get_user_levels(user_id):
                     }
                     if user_answer:
                         question_data["user_answer"] = {
-                            "correct_words": user_answer.correct_words,
-                            "wrong_words": user_answer.wrong_words,
                             "percentage": user_answer.percentage,
+                            "speechace_response": (
+                                json.loads(user_answer.speechace_response)
+                                if user_answer.speechace_response
+                                else {}
+                            ),
                             "submitted_at": user_answer.submitted_at.isoformat(),
+                        }
+                    else:
+                        question_data["user_answer"] = {
+                            "percentage": None,
+                            "speechace_response": {},
+                            "submitted_at": None,
                         }
                     questions_data.append(question_data)
 
