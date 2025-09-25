@@ -299,17 +299,27 @@ def get_all_users():
     )
 
 
-@bp.route("/admin/users/<int:user_id>", methods=["DELETE"])
-@admin_required
+@bp.route("/users/<int:user_id>", methods=["DELETE"])
+@client_required
 def delete_user(user_id):
+    current_user_id = int(get_jwt_identity())
     lang = ValidationHelper.get_language_from_request()
-    user = User.query.get_or_404(user_id)
+    
+    user = User.query.get(current_user_id)
+    
+    # Check if user has permission to delete this account
+    if user.role != "admin" and current_user_id != user_id:
+        return LocalizationHelper.get_error_response("access_denied", lang, 403)
+    
+    target_user = User.query.get_or_404(user_id)
 
+    # Delete all related data for the user
     UserLevel.query.filter_by(user_id=user_id).delete()
     ExamResult.query.filter_by(user_id=user_id).delete()
     UserQuestionAnswer.query.filter_by(user_id=user_id).delete()
-
-    db.session.delete(user)
+    
+    # Delete the user
+    db.session.delete(target_user)
     db.session.commit()
 
     return LocalizationHelper.get_success_response(
