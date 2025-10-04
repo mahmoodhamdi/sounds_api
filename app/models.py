@@ -40,11 +40,13 @@ class Level(db.Model):
 class Video(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     level_id = db.Column(db.Integer, db.ForeignKey('level.id'), nullable=False)
+    name = db.Column(db.String(200), nullable=False)  # NEW FIELD
     youtube_link = db.Column(db.String(200), nullable=False)
+    order = db.Column(db.Integer, nullable=False, default=1)  # NEW FIELD for ordering
     questions = db.relationship('Question', backref='video', lazy=True, cascade='all, delete-orphan')
 
     def _repr_(self):
-        return f'Video(\'{self.youtube_link}\')'
+        return f'Video(\'{self.name}\', \'{self.youtube_link}\')'
 
 class Question(db.Model):
     id = db.Column(db.Integer, primary_key=True)

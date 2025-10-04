@@ -583,6 +583,8 @@ def _format_video_data(video):
     )
     return {
         "id": video.id,
+        "name": video.name,
+        "order": video.order,
         "youtube_link": video.youtube_link,
         "questions": [
             {"id": q.id, "text": q.text, "order": q.order} for q in questions
@@ -888,34 +890,40 @@ def add_video_to_level(level_id):
     level = Level.query.get_or_404(level_id)
     data = request.get_json()
 
-    video = Video(level_id=level_id, youtube_link=data["youtube_link"])
+    # Get the maximum order number for videos in this level
+    max_order = (
+        db.session.query(db.func.max(Video.order))
+        .filter_by(level_id=level_id)
+        .scalar()
+        or 0
+    )
+
+    video = Video(
+        level_id=level_id, 
+        name=data["name"],
+        youtube_link=data["youtube_link"],
+        order=data.get("order", max_order + 1)
+    )
 
     db.session.add(video)
-    db.session.flush()  # This ensures video.id is available
+    db.session.flush()
 
-    # Get all existing UserLevel records for this level
     user_levels = UserLevel.query.filter_by(level_id=level_id).all()
 
-    # Create UserVideoProgress for each user who has purchased this level
     for user_level in user_levels:
-        # Check if this is the first video for this user (should be opened by default)
         existing_progress_count = UserVideoProgress.query.filter_by(
             user_level_id=user_level.id
         ).count()
 
-        # If user has no videos yet, or if all existing videos are completed, open this video
         is_opened = False
         if existing_progress_count == 0:
-            # First video for this user - should be opened
             is_opened = True
         else:
-            # Check if all existing videos are completed
             completed_videos = UserVideoProgress.query.filter_by(
                 user_level_id=user_level.id,
                 is_completed=True
             ).count()
 
-            # If all existing videos are completed, open the new video
             if completed_videos == existing_progress_count:
                 is_opened = True
 
@@ -931,6 +939,8 @@ def add_video_to_level(level_id):
 
     response_data = {
         "id": video.id,
+        "name": video.name,
+        "order": video.order,
         "youtube_link": video.youtube_link,
         "questions": [],
     }
@@ -945,11 +955,18 @@ def update_video(video_id):
     video = Video.query.get_or_404(video_id)
     data = request.get_json()
 
+    video.name = data.get("name", video.name)
     video.youtube_link = data.get("youtube_link", video.youtube_link)
+    
+    if "order" in data:
+        video.order = data.get("order")
+    
     db.session.commit()
 
     response_data = {
         "id": video.id,
+        "name": video.name,
+        "order": video.order,
         "youtube_link": video.youtube_link,
         "questions": [
             {"id": q.id, "text": q.text, "order": q.order} for q in video.questions
@@ -982,12 +999,14 @@ def delete_video(video_id):
 @admin_required
 def get_all_videos():
     lang = ValidationHelper.get_language_from_request()
-    videos = Video.query.all()
+    videos = Video.query.order_by(Video.level_id, Video.order).all()
     result = [
         {
             "id": video.id,
             "level_id": video.level_id,
             "level_name": video.level.name if video.level else "",
+            "name": video.name,
+            "order": video.order,
             "youtube_link": video.youtube_link,
             "questions": [
                 {"id": q.id, "text": q.text, "order": q.order} for q in video.questions
@@ -1002,7 +1021,58 @@ def get_all_videos():
         "operation_successful", {"videos": result}, lang, status_code=200
     )
 
-
+@bp.route("/levels/<int:level_id>/videos/reorder", methods=["PATCH"])
+@admin_required
+def reorder_videos(level_id):
+    """
+    Reorder videos in a level
+    Expected JSON body: {"video_orders": [{"video_id": 1, "order": 1}, {"video_id": 2, "order": 2}, ...]}
+    """
+    lang = ValidationHelper.get_language_from_request()
+    level = Level.query.get_or_404(level_id)
+    data = request.get_json()
+    
+    video_orders = data.get("video_orders", [])
+    
+    if not video_orders:
+        return LocalizationHelper.get_error_response(
+            "required_field", lang, 400, field="video_orders"
+        )
+    
+    try:
+        for item in video_orders:
+            video_id = item.get("video_id")
+            new_order = item.get("order")
+            
+            if video_id is None or new_order is None:
+                return LocalizationHelper.get_error_response(
+                    "invalid_format", lang, 400, field="video_orders"
+                )
+            
+            video = Video.query.filter_by(id=video_id, level_id=level_id).first()
+            if not video:
+                return LocalizationHelper.get_error_response(
+                    "video_not_found", lang, 404
+                )
+            
+            video.order = new_order
+        
+        db.session.commit()
+        
+        # Return updated videos list
+        videos = Video.query.filter_by(level_id=level_id).order_by(Video.order).all()
+        videos_data = [_format_video_data(v) for v in videos]
+        
+        return LocalizationHelper.get_success_response(
+            "video_updated_successfully", 
+            {"videos": videos_data}, 
+            lang, 
+            status_code=200
+        )
+        
+    except Exception as e:
+        db.session.rollback()
+        return LocalizationHelper.get_error_response("database_error", lang, 500)
 # Question Management Routes (CRUD)
 @bp.route("/videos/<int:video_id>/questions", methods=["POST"])
 @admin_required
