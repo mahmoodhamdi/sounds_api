@@ -7,3 +7,6 @@ Werkzeug
 Flask-Migrate
 pandas
 numpy
+reportlab
+matplotlib
+seaborn
