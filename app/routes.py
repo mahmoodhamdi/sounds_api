@@ -612,6 +612,7 @@ def delete_level(level_id):
     )
 
 
+
 @bp.route("/levels", methods=["GET"])
 def get_levels():
     lang = ValidationHelper.get_language_from_request()
@@ -720,6 +721,8 @@ def get_levels():
 
                     video_data = {
                         "id": video.id,
+                        "name": video.name,
+                        "order": video.order,
                         "youtube_link": (
                             video.youtube_link
                             if user.role == "admin"
@@ -736,7 +739,13 @@ def get_levels():
             else:
                 # User is authenticated but hasn't purchased this level
                 level_data["videos"] = [
-                    {"id": v.id, "youtube_link": "", "questions": []} for v in level.videos
+                    {
+                        "id": v.id,
+                        "name": v.name,
+                        "order": v.order,
+                        "youtube_link": "",
+                        "questions": []
+                    } for v in level.videos
                 ]
 
             if user.role == "admin":
@@ -744,7 +753,13 @@ def get_levels():
         else:
             # Guest user - provide basic video structure without content
             level_data["videos"] = [
-                {"id": v.id, "youtube_link": "", "questions": []} for v in level.videos
+                {
+                    "id": v.id,
+                    "name": v.name,
+                    "order": v.order,
+                    "youtube_link": "",
+                    "questions": []
+                } for v in level.videos
             ]
 
         result.append(level_data)
@@ -1639,6 +1654,8 @@ def get_user_report():
             videos_data.append(
                 {
                     "video_id": video.id,
+                    "video_name": video.name,
+                    "video_order": video.order,
                     "youtube_link": video.youtube_link,
                     "is_opened": progress.is_opened,
                     "is_completed": progress.is_completed,
@@ -1684,8 +1701,9 @@ def get_user_report():
     return LocalizationHelper.get_success_response(
         "operation_successful", report, lang, status_code=200
     )
-
 # Get User Levels Route
+# Update get_user_levels route:
+
 @bp.route("/users/<int:user_id>/levels", methods=["GET"])
 @client_required
 def get_user_levels(user_id):
@@ -1750,6 +1768,8 @@ def get_user_levels(user_id):
 
             video_data = {
                 "id": video.id,
+                "name": video.name,
+                "order": video.order,
                 "youtube_link": (
                     video.youtube_link if user.role == "admin" or is_opened else ""
                 ),
