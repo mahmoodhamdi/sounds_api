@@ -882,21 +882,28 @@ def get_level(level_id):
 
             video_data = {
                 "id": video.id,
+                "name": video.name,
+                "order": video.order,
                 "youtube_link": video.youtube_link,
                 "questions": questions_data,
                 "is_opened": video_progress.is_opened if video_progress else False,
             }
             level_data["videos"].append(video_data)
     else:
+        # User hasn't purchased this level - return video structure without youtube_link
         level_data["videos"] = [
-            {"id": v.id, "youtube_link": "", "questions": []} for v in level.videos
+            {
+                "id": v.id,
+                "name": v.name,
+                "order": v.order,
+                "youtube_link": "",
+                "questions": []
+            } for v in level.videos
         ]
 
     return LocalizationHelper.get_success_response(
         "operation_successful", level_data, lang, status_code=200
     )
-
-
 # Video Management Routes
 @bp.route("/levels/<int:level_id>/videos", methods=["POST"])
 @admin_required
