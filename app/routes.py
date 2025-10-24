@@ -75,11 +75,36 @@ from app.validation import ValidationHelper
 
 bp = Blueprint("main", __name__)
 
-
+def handle_profile_picture_upload(file):
+    """Helper function to handle profile picture file upload"""
+    if not file or file.filename == '':
+        return None
+    
+    allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+    if '.' in file.filename:
+        file_ext = file.filename.rsplit('.', 1)[1].lower()
+        if file_ext not in allowed_extensions:
+            return None
+    
+    filename = secure_filename(file.filename)
+    unique_filename = f"{uuid.uuid4()}_{filename}"
+    upload_path = os.path.join(current_app.config['PROFILE_UPLOAD_FOLDER'], unique_filename)
+    os.makedirs(os.path.dirname(upload_path), exist_ok=True)
+    
+    try:
+        file.save(upload_path)
+        return f"/Uploads/profiles/{unique_filename}"
+    except Exception:
+        return None
+        
 # Serve uploaded files
 @bp.route("/Uploads/levels/<filename>")
 def serve_uploaded_file(filename):
     return send_from_directory(current_app.config["UPLOAD_FOLDER"], filename)
+
+@bp.route("/Uploads/profiles/<filename>")
+def serve_profile_picture(filename):
+    return send_from_directory(current_app.config["PROFILE_UPLOAD_FOLDER"], filename)
 
 
 # Custom decorator to allow both admin and client roles
@@ -140,21 +165,39 @@ def get_welcome_video():
 # Authentication Routes
 @bp.route("/register", methods=["POST"])
 def register():
-    data = request.get_json()
     lang = ValidationHelper.get_language_from_request()
-
+    
+    # Check if request contains files (multipart/form-data) or JSON
+    if request.content_type and 'multipart/form-data' in request.content_type:
+        data = request.form.to_dict()
+    else:
+        data = request.get_json()
+    
     if User.query.filter_by(email=data["email"]).first():
         return LocalizationHelper.get_error_response("user_already_exists", lang, 400)
 
     hashed_password = bcrypt.generate_password_hash(data["password"]).decode("utf-8")
 
+    # Handle profile picture
+    picture_url = None
+    
+    # Check if picture is uploaded as file
+    if 'picture' in request.files:
+        file = request.files['picture']
+        picture_url = handle_profile_picture_upload(file)
+        if picture_url is None and file.filename != '':
+            return LocalizationHelper.get_error_response("invalid_file_type", lang, 400)
+    # Check if picture is provided as URL in data
+    elif 'picture' in data and data['picture']:
+        picture_url = data['picture']
+
     user = User(
         name=data["name"],
         email=data["email"],
         password=hashed_password,
-        phone=data.get("phone"),  # Added phone number - can be null
+        phone=data.get("phone"),
         role=data.get("role", "client"),
-        picture=data.get("picture", ""),
+        picture=picture_url or "",
     )
 
     db.session.add(user)
@@ -248,14 +291,41 @@ def update_user(user_id):
         return LocalizationHelper.get_error_response("access_denied", lang, 403)
 
     target_user = User.query.get_or_404(user_id)
-    data = request.get_json()
+    
+    # Check if request contains files (multipart/form-data) or JSON
+    if request.content_type and 'multipart/form-data' in request.content_type:
+        data = request.form.to_dict()
+    else:
+        data = request.get_json()
 
     # Update only provided fields
     if "name" in data:
         target_user.name = data["name"]
     if "phone" in data:
         target_user.phone = data["phone"]
-    if "picture" in data:
+    
+    # Handle profile picture update
+    if 'picture' in request.files:
+        # Picture uploaded as file
+        file = request.files['picture']
+        picture_url = handle_profile_picture_upload(file)
+        if picture_url is None and file.filename != '':
+            return LocalizationHelper.get_error_response("invalid_file_type", lang, 400)
+        if picture_url:
+            # Delete old profile picture file if it exists
+            if target_user.picture and target_user.picture.startswith("/Uploads/profiles/"):
+                old_file_path = os.path.join(
+                    current_app.config["PROFILE_UPLOAD_FOLDER"],
+                    target_user.picture.replace("/Uploads/profiles/", "")
+                )
+                if os.path.exists(old_file_path):
+                    try:
+                        os.remove(old_file_path)
+                    except OSError:
+                        pass
+            target_user.picture = picture_url
+    elif "picture" in data:
+        # Picture provided as URL string
         target_user.picture = data["picture"]
 
     # Only admin can update role
