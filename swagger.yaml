@@ -1,0 +1,1369 @@
+openapi: 3.0.3
+info:
+  title: Sounds API
+  description: |
+    Educational API platform for language learning and pronunciation improvement.
+
+    ## Authentication
+    This API uses JWT Bearer tokens. Include the token in the Authorization header:
+    ```
+    Authorization: Bearer <your_token>
+    ```
+
+    ## Localization
+    The API supports English (en) and Arabic (ar). Specify language using:
+    - Query parameter: `?lang=ar`
+    - Header: `Accept-Language: ar`
+
+    ## Response Format
+    All responses follow this format:
+    ```json
+    {
+      "success": true/false,
+      "message": "Human readable message",
+      "message_key": "message_key_for_client",
+      "lang": "en",
+      "data": {...}
+    }
+    ```
+  version: 1.0.0
+  contact:
+    name: Mahmood Hamdi
+    email: hmdy7486@gmail.com
+
+servers:
+  - url: http://localhost:5000
+    description: Development server
+  - url: https://api.soundread.com
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: User registration and login
+  - name: Users
+    description: User management operations
+  - name: Levels
+    description: Learning level management
+  - name: Videos
+    description: Video content management
+  - name: Questions
+    description: Question management and answering
+  - name: Exams
+    description: Initial and final exam operations
+  - name: Progress
+    description: User progress tracking
+  - name: Admin
+    description: Admin-only operations
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from login endpoint
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "John Doe"
+        email:
+          type: string
+          format: email
+          example: "john@example.com"
+        phone:
+          type: string
+          example: "+966501234567"
+        role:
+          type: string
+          enum: [admin, client]
+          example: "client"
+        picture:
+          type: string
+          example: "/Uploads/profiles/uuid_filename.jpg"
+
+    Level:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "Beginner Level"
+        description:
+          type: string
+          example: "Introduction to pronunciation"
+        level_number:
+          type: integer
+          example: 1
+        welcome_video_url:
+          type: string
+          example: "https://youtube.com/watch?v=..."
+        image_path:
+          type: string
+          example: "/Uploads/levels/uuid_image.jpg"
+        price:
+          type: number
+          format: float
+          example: 99.99
+        initial_exam_question:
+          type: string
+          example: "Read the following sentence..."
+        final_exam_question:
+          type: string
+          example: "Read the following paragraph..."
+        videos_count:
+          type: integer
+          example: 10
+
+    Video:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "Introduction to Vowels"
+        order:
+          type: integer
+          example: 1
+        youtube_link:
+          type: string
+          example: "https://youtube.com/watch?v=..."
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Question'
+
+    Question:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        video_id:
+          type: integer
+          example: 1
+        text:
+          type: string
+          example: "Pronounce the word: Hello"
+        order:
+          type: integer
+          example: 1
+        created_at:
+          type: string
+          format: date-time
+
+    UserQuestionAnswer:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        question_id:
+          type: integer
+          example: 1
+        percentage:
+          type: number
+          format: float
+          example: 85.5
+        speechace_response:
+          type: object
+          description: Full SpeechAce API response
+        submitted_at:
+          type: string
+          format: date-time
+
+    ExamResult:
+      type: object
+      properties:
+        user_id:
+          type: integer
+          example: 1
+        level_id:
+          type: integer
+          example: 1
+        percentage:
+          type: number
+          format: float
+          example: 78.5
+        type:
+          type: string
+          enum: [initial, final]
+        speechace_response:
+          type: object
+        timestamp:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: "User not found"
+        message_key:
+          type: string
+          example: "user_not_found"
+        lang:
+          type: string
+          example: "en"
+
+    Success:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "Operation completed successfully"
+        message_key:
+          type: string
+          example: "operation_successful"
+        lang:
+          type: string
+          example: "en"
+
+  parameters:
+    LangParam:
+      name: lang
+      in: query
+      description: Language for response messages (en/ar)
+      schema:
+        type: string
+        enum: [en, ar]
+        default: en
+
+    AcceptLanguageHeader:
+      name: Accept-Language
+      in: header
+      description: Language preference
+      schema:
+        type: string
+        enum: [en, ar]
+
+paths:
+  # Welcome Video
+  /welcome_video:
+    post:
+      tags: [Admin]
+      summary: Set welcome video
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [video_url]
+              properties:
+                video_url:
+                  type: string
+                  example: "https://youtube.com/watch?v=xyz"
+      responses:
+        '200':
+          description: Welcome video set successfully
+        '401':
+          description: Unauthorized
+        '403':
+          description: Admin access required
+
+    get:
+      tags: [Authentication]
+      summary: Get welcome video
+      parameters:
+        - $ref: '#/components/parameters/LangParam'
+      responses:
+        '200':
+          description: Welcome video URL
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      video_url:
+                        type: string
+        '404':
+          description: No welcome video set
+
+  # Authentication
+  /register:
+    post:
+      tags: [Authentication]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name:
+                  type: string
+                  example: "John Doe"
+                email:
+                  type: string
+                  format: email
+                  example: "john@example.com"
+                password:
+                  type: string
+                  minLength: 6
+                  example: "password123"
+                phone:
+                  type: string
+                  example: "+966501234567"
+                role:
+                  type: string
+                  enum: [admin, client]
+                  default: client
+                picture:
+                  type: string
+                  description: URL or will be uploaded
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                password:
+                  type: string
+                phone:
+                  type: string
+                picture:
+                  type: string
+                  format: binary
+                  description: Profile picture file
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - $ref: '#/components/schemas/User'
+                  - type: object
+                    properties:
+                      token:
+                        type: string
+                        description: JWT access token
+        '400':
+          description: User already exists or validation error
+
+  /login:
+    post:
+      tags: [Authentication]
+      summary: User login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                google:
+                  type: boolean
+                  description: Set true for Google login (skips password check)
+                  default: false
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - $ref: '#/components/schemas/User'
+                  - type: object
+                    properties:
+                      token:
+                        type: string
+        '401':
+          description: Invalid credentials
+        '404':
+          description: User not found
+
+  # User Management
+  /users/{user_id}:
+    get:
+      tags: [Users]
+      summary: Get user profile
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - $ref: '#/components/parameters/LangParam'
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - $ref: '#/components/schemas/User'
+        '403':
+          description: Access denied
+        '404':
+          description: User not found
+
+    patch:
+      tags: [Users]
+      summary: Update user profile
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                phone:
+                  type: string
+                picture:
+                  type: string
+                role:
+                  type: string
+                  description: Only admin can change roles
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                phone:
+                  type: string
+                picture:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: User updated
+        '403':
+          description: Access denied
+
+    delete:
+      tags: [Users]
+      summary: Delete user account
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User deleted
+        '403':
+          description: Access denied
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: Get all users
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of all users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      users:
+                        type: array
+                        items:
+                          allOf:
+                            - $ref: '#/components/schemas/User'
+                            - type: object
+                              properties:
+                                level_count:
+                                  type: integer
+        '403':
+          description: Admin access required
+
+  /admin/users/{user_id}/reset_password:
+    post:
+      tags: [Admin]
+      summary: Reset user password
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_password]
+              properties:
+                new_password:
+                  type: string
+                  minLength: 6
+      responses:
+        '200':
+          description: Password reset successfully
+        '403':
+          description: Admin access required
+
+  /admin/users/{user_id}/assign_level/{level_id}:
+    post:
+      tags: [Admin]
+      summary: Assign level to user (free)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '201':
+          description: Level assigned
+        '400':
+          description: Level already assigned
+        '403':
+          description: Admin access required
+
+  # Level Management
+  /levels:
+    get:
+      tags: [Levels]
+      summary: Get all levels
+      description: Returns all levels. Authenticated users see their progress.
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/LangParam'
+        - name: min_price
+          in: query
+          schema:
+            type: number
+        - name: max_price
+          in: query
+          schema:
+            type: number
+        - name: level_number
+          in: query
+          schema:
+            type: integer
+        - name: name
+          in: query
+          schema:
+            type: string
+          description: Search by name (partial match)
+      responses:
+        '200':
+          description: List of levels
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      levels:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Level'
+
+    post:
+      tags: [Admin]
+      summary: Create new level
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name, level_number, price, file]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                level_number:
+                  type: integer
+                welcome_video_url:
+                  type: string
+                price:
+                  type: number
+                initial_exam_question:
+                  type: string
+                final_exam_question:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+                  description: Level cover image
+      responses:
+        '201':
+          description: Level created
+        '400':
+          description: Validation error
+        '403':
+          description: Admin access required
+
+  /levels/{level_id}:
+    get:
+      tags: [Levels]
+      summary: Get level details
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Level details with videos and progress
+        '404':
+          description: Level not found
+
+    put:
+      tags: [Admin]
+      summary: Update level
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                level_number:
+                  type: integer
+                welcome_video_url:
+                  type: string
+                price:
+                  type: number
+                initial_exam_question:
+                  type: string
+                final_exam_question:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Level updated
+        '403':
+          description: Admin access required
+
+    patch:
+      tags: [Admin]
+      summary: Partial update level
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                level_number:
+                  type: integer
+                price:
+                  type: number
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Level updated
+
+    delete:
+      tags: [Admin]
+      summary: Delete level
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Level deleted
+        '403':
+          description: Admin access required
+
+  /admin/levels:
+    get:
+      tags: [Admin]
+      summary: Get all levels with admin details
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: min_price
+          in: query
+          schema:
+            type: number
+        - name: max_price
+          in: query
+          schema:
+            type: number
+        - name: level_number
+          in: query
+          schema:
+            type: integer
+        - name: name
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Levels with user counts and full video data
+
+  # Video Management
+  /levels/{level_id}/videos:
+    post:
+      tags: [Admin]
+      summary: Add video to level
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, youtube_link]
+              properties:
+                name:
+                  type: string
+                  example: "Introduction to Vowels"
+                youtube_link:
+                  type: string
+                  example: "https://youtube.com/watch?v=..."
+                order:
+                  type: integer
+                  description: Auto-assigned if not provided
+      responses:
+        '201':
+          description: Video created
+        '403':
+          description: Admin access required
+
+  /levels/{level_id}/videos/reorder:
+    patch:
+      tags: [Admin]
+      summary: Reorder videos in level
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [video_orders]
+              properties:
+                video_orders:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      video_id:
+                        type: integer
+                      order:
+                        type: integer
+            example:
+              video_orders:
+                - video_id: 1
+                  order: 2
+                - video_id: 2
+                  order: 1
+      responses:
+        '200':
+          description: Videos reordered
+
+  /videos/{video_id}:
+    put:
+      tags: [Admin]
+      summary: Update video
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: video_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                youtube_link:
+                  type: string
+                order:
+                  type: integer
+      responses:
+        '200':
+          description: Video updated
+
+    delete:
+      tags: [Admin]
+      summary: Delete video
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: video_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Video deleted
+
+  /admin/videos:
+    get:
+      tags: [Admin]
+      summary: Get all videos
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: All videos with progress counts
+
+  # Question Management
+  /videos/{video_id}/questions:
+    get:
+      tags: [Questions]
+      summary: Get video questions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: video_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Questions with user answers (for clients)
+
+    post:
+      tags: [Admin]
+      summary: Create question
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: video_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                  example: "Pronounce: Hello World"
+                order:
+                  type: integer
+      responses:
+        '201':
+          description: Question created
+
+  /questions/{question_id}:
+    put:
+      tags: [Admin]
+      summary: Update question
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: question_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: string
+                order:
+                  type: integer
+      responses:
+        '200':
+          description: Question updated
+
+    delete:
+      tags: [Admin]
+      summary: Delete question
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: question_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Question deleted
+
+  /questions/{question_id}/submit:
+    post:
+      tags: [Questions]
+      summary: Submit question answer
+      description: Submit pronunciation recording result from SpeechAce API
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: question_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [speechace_response]
+              properties:
+                speechace_response:
+                  type: object
+                  description: Full response from SpeechAce API
+                  example:
+                    text_score:
+                      speechace_score:
+                        pronunciation: 85.5
+      responses:
+        '200':
+          description: Answer submitted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - $ref: '#/components/schemas/UserQuestionAnswer'
+        '400':
+          description: Video must be opened first
+        '403':
+          description: Level not purchased
+
+  /users/{user_id}/questions/{question_id}/answer:
+    get:
+      tags: [Questions]
+      summary: Get user's answer to question
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: question_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User answer details
+        '404':
+          description: Answer not found
+
+  /admin/questions:
+    get:
+      tags: [Admin]
+      summary: Get all questions
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: All questions with answer counts
+
+  /admin/questions/{question_id}/answers:
+    get:
+      tags: [Admin]
+      summary: Get all answers to a question
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: question_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: All user answers for question
+
+  # Exams
+  /exams/{level_id}/initial:
+    post:
+      tags: [Exams]
+      summary: Submit initial exam
+      description: Submit pronunciation test before starting the level
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [speechace_response]
+              properties:
+                speechace_response:
+                  type: object
+      responses:
+        '201':
+          description: Initial exam submitted
+        '400':
+          description: Level not purchased
+
+  /exams/{level_id}/final:
+    post:
+      tags: [Exams]
+      summary: Submit final exam
+      description: Submit final pronunciation test after completing all videos
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [speechace_response]
+              properties:
+                speechace_response:
+                  type: object
+      responses:
+        '201':
+          description: Final exam submitted
+        '400':
+          description: Cannot take final exam (videos not completed)
+
+  /exams/{level_id}/user/{user_id}:
+    get:
+      tags: [Exams]
+      summary: Get user exam results
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Exam results (initial and final)
+
+  # Progress
+  /users/{user_id}/levels:
+    get:
+      tags: [Progress]
+      summary: Get user's purchased levels with progress
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User levels with video progress
+
+  /users/{user_id}/levels/{level_id}/purchase:
+    post:
+      tags: [Progress]
+      summary: Purchase a level
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '201':
+          description: Level purchased
+        '400':
+          description: Level already purchased
+
+  /users/{user_id}/levels/{level_id}/videos/{video_id}/complete:
+    patch:
+      tags: [Progress]
+      summary: Mark video as completed
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: video_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Video marked as completed, next video unlocked
+
+  /users/{user_id}/levels/{level_id}/update_progress:
+    patch:
+      tags: [Progress]
+      summary: Update level progress
+      description: Recalculates if user can take final exam
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: level_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Progress updated
+
+  /report:
+    get:
+      tags: [Progress]
+      summary: Get user progress report
+      description: Comprehensive report of user's learning progress
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Full progress report with all levels, videos, questions
+
+  # Admin Statistics
+  /admin/statistics:
+    get:
+      tags: [Admin]
+      summary: Get platform statistics
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Platform-wide statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_users:
+                    type: integer
+                  total_levels:
+                    type: integer
+                  total_purchases:
+                    type: integer
+                  completed_levels:
+                    type: integer
+                  completion_rate:
+                    type: number
+                  popular_levels:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        purchases:
+                          type: integer
+
+  /admin/users/{user_id}/statistics:
+    get:
+      tags: [Admin]
+      summary: Get user statistics
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User-specific statistics
+
+  # Static Files
+  /Uploads/levels/{filename}:
+    get:
+      tags: [Static]
+      summary: Serve level cover image
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Image file
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+
+  /Uploads/profiles/{filename}:
+    get:
+      tags: [Static]
+      summary: Serve profile picture
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Image file
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
